@@ -7,6 +7,7 @@ const cors = require('cors');
 const morgan = require('morgan');
 const mongoSanitize = require('express-mongo-sanitize');
 const rateLimit = require('express-rate-limit');
+const xss = require('xss-clean');
 const cron = require('node-cron');
 const jwt = require('jsonwebtoken');
 
@@ -95,14 +96,25 @@ const authLimiter = rateLimit({
   message: { success: false, message: 'Too many auth attempts. Please wait 15 minutes.' },
 });
 
+const walletLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { success: false, message: 'Too many wallet requests. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 app.use('/api/', limiter);
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/register', authLimiter);
+app.use('/api/wallet/withdraw', walletLimiter);
+app.use('/api/wallet/recharge', walletLimiter);
 
 // ─── General Middleware ───────────────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(mongoSanitize());
+app.use(xss());
 
 if (process.env.NODE_ENV !== 'test') {
   app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));

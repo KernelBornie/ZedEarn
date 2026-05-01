@@ -97,12 +97,14 @@ router.post(
       const newTierIdx = VIP_TIERS.indexOf(safePlanName);
       const finalTier = VIP_TIERS[Math.max(currentTierIdx, newTierIdx)];
 
-      // Deduct balance
+      // Deduct balance and update VIP fields atomically
       await User.findByIdAndUpdate(req.user._id, {
         $inc: { balance: -plan.price },
-        vipTier: finalTier,
-        vipExpiry: newExpiry,
-        role: finalTier !== 'none' ? 'vip' : user.role,
+        $set: {
+          vipTier: finalTier,
+          vipExpiry: newExpiry,
+          role: finalTier !== 'none' ? 'vip' : user.role,
+        },
       });
 
       const transaction = await Transaction.create({
