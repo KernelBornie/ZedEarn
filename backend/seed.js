@@ -39,8 +39,8 @@ async function seed() {
 
     console.log(`VIP Plans seeded: ${vipPlans.length}`);
 
-    // USERS (IMPORTANT FIX: referralCode auto generated, no null issue)
-    const users = await User.insertMany([
+    // USERS — use create() (not insertMany) so the pre-save password-hashing hook runs
+    const users = await User.create([
       {
         name: 'Admin',
         email: 'admin@zedearn.zm',

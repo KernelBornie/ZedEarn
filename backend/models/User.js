@@ -23,7 +23,7 @@ const UserSchema = new mongoose.Schema(
       trim: true,
       lowercase: true,
       unique: true,
-      required: true,
+      sparse: true,
     },
 
     password: {
@@ -88,12 +88,26 @@ const UserSchema = new mongoose.Schema(
     deviceTokens: { type: [String], default: [] },
     profilePhoto: { type: String, default: null },
   },
-  { timestamps: true }
+  { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } }
 );
 
 // indexes
 UserSchema.index({ referralCode: 1 }, { unique: true, sparse: true });
+UserSchema.index({ email: 1 }, { unique: true, sparse: true });
 UserSchema.index({ lifetimeEarnings: -1 });
+
+// Virtual: full referral URL
+UserSchema.virtual('fullReferralLink').get(function () {
+  const base = process.env.CLIENT_URL;
+  if (!base) {
+    if (process.env.NODE_ENV === 'production') {
+      console.warn('[WARN] CLIENT_URL is not set. Referral links will be empty in production.');
+      return null;
+    }
+    return `http://localhost:5173/register?ref=${this.referralCode}`;
+  }
+  return `${base}/register?ref=${this.referralCode}`;
+});
 
 // PASSWORD HASHING FIXED
 UserSchema.pre('save', async function (next) {
