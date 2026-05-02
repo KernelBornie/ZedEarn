@@ -12,7 +12,6 @@
  */
 
 const mongoose = require('mongoose');
-const path = require('path');
 const WalletLedger = require('../models/WalletLedger');
 const WalletSnapshot = require('../models/WalletSnapshot');
 const User = require('../models/User');
