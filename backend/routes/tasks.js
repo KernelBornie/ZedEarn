@@ -8,6 +8,7 @@ const Notification = require('../models/Notification');
 const User = require('../models/User');
 const { protect, authorize } = require('../middleware/auth');
 const { safeEnum } = require('../utils/sanitize');
+const ledgerService = require('../services/ledgerService');
 
 const TASK_TYPES = ['product', 'survey', 'adwatch', 'sponsored', 'daily_checkin', 'weekly_mission', 'referral', 'team'];
 const VIP_TIERS = ['none', 'silver', 'gold', 'platinum', 'diamond'];
@@ -214,19 +215,20 @@ router.post('/:id/complete', protect, async (req, res) => {
       processedAt: new Date(),
     });
 
-    // Update user balances
-    const user = await User.findByIdAndUpdate(
-      req.user._id,
-      {
-        $inc: {
-          rewardBalance: rewardAmount,
-          balance: rewardAmount,
-          lifetimeEarnings: rewardAmount,
-          xpPoints: Math.ceil(rewardAmount),
-        },
-      },
-      { new: true }
-    );
+    // Credit reward via ledger (atomic: creates ledger entry + updates balance)
+    await ledgerService.credit(req.user._id, rewardAmount, 'TASK', {
+      taskId: task._id,
+      completionId: completion._id,
+      transactionRef: transaction.reference,
+    });
+
+    // XP points are not a financial field — update directly
+    await User.findByIdAndUpdate(req.user._id, {
+      $inc: { xpPoints: Math.ceil(rewardAmount) },
+    });
+
+    // Fetch updated user for response / socket emission
+    const user = await User.findById(req.user._id);
 
     // Update task counter
     await Task.findByIdAndUpdate(task._id, { $inc: { totalCompleted: 1 } });

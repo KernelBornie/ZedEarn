@@ -7,6 +7,7 @@ const Transaction = require('../models/Transaction');
 const Notification = require('../models/Notification');
 const { protect, authorize } = require('../middleware/auth');
 const { safeEnum } = require('../utils/sanitize');
+const ledgerService = require('../services/ledgerService');
 
 const VALID_PLANS = ['silver', 'gold', 'platinum', 'diamond'];
 
@@ -97,9 +98,15 @@ router.post(
       const newTierIdx = VIP_TIERS.indexOf(safePlanName);
       const finalTier = VIP_TIERS[Math.max(currentTierIdx, newTierIdx)];
 
-      // Deduct balance
+      // Deduct balance via ledger, then update VIP fields separately
+      await ledgerService.debit(req.user._id, plan.price, 'VIP', {
+        planName: safePlanName,
+        duration: plan.duration,
+        expiry: newExpiry,
+      });
+
+      // Update VIP metadata (non-financial fields — direct update is fine here)
       await User.findByIdAndUpdate(req.user._id, {
-        $inc: { balance: -plan.price },
         vipTier: finalTier,
         vipExpiry: newExpiry,
         role: finalTier !== 'none' ? 'vip' : user.role,

@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const mongoose = require('mongoose');
 const { body, validationResult } = require('express-validator');
 const MarketplaceItem = require('../models/MarketplaceItem');
 const User = require('../models/User');
@@ -7,6 +8,7 @@ const Transaction = require('../models/Transaction');
 const Notification = require('../models/Notification');
 const { protect, authorize } = require('../middleware/auth');
 const { escapeRegex, safeEnum } = require('../utils/sanitize');
+const ledgerService = require('../services/ledgerService');
 
 const ITEM_CATEGORIES = ['airtime', 'data', 'voucher', 'service', 'product'];
 
@@ -171,17 +173,27 @@ router.post('/:id/purchase', protect, async (req, res) => {
     const commission = parseFloat((item.price * item.commissionRate).toFixed(2));
     const sellerReceives = parseFloat((item.price - commission).toFixed(2));
 
-    // Deduct buyer balance
-    await User.findByIdAndUpdate(req.user._id, { $inc: { balance: -item.price } });
+    // Atomically debit buyer and credit seller via ledger
+    const session = await mongoose.startSession();
+    session.startTransaction();
+    try {
+      await ledgerService.debit(req.user._id, item.price, 'MARKETPLACE', {
+        itemId: item._id,
+        sellerId: item.sellerId,
+      }, session);
 
-    // Add to seller balance + commission
-    await User.findByIdAndUpdate(item.sellerId, {
-      $inc: {
-        balance: sellerReceives,
-        commissionBalance: commission,
-        lifetimeEarnings: sellerReceives,
-      },
-    });
+      await ledgerService.creditMarketplaceSale(item.sellerId, sellerReceives, commission, {
+        itemId: item._id,
+        buyerId: req.user._id,
+      }, session);
+
+      await session.commitTransaction();
+    } catch (txErr) {
+      await session.abortTransaction();
+      session.endSession();
+      throw txErr;
+    }
+    session.endSession();
 
     // Update item stock
     const newStock = item.stock - 1;
