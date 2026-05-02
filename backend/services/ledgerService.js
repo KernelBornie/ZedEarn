@@ -12,9 +12,13 @@
  */
 
 const mongoose = require('mongoose');
+const path = require('path');
 const WalletLedger = require('../models/WalletLedger');
 const WalletSnapshot = require('../models/WalletSnapshot');
 const User = require('../models/User');
+
+// Categories that contribute to lifetimeEarnings
+const EARNING_CATEGORIES = ['TASK', 'REFERRAL', 'DEPOSIT', 'ADMIN', 'MARKETPLACE'];
 
 // ─── Internal helper: sync WalletSnapshot from User fields ────────────────────
 const _syncSnapshot = async (userId, session) => {
@@ -60,7 +64,7 @@ const credit = async (userId, amount, category, meta = {}, session) => {
   if (!amount || amount <= 0) throw new Error('Credit amount must be positive');
 
   const opts = session ? { session } : {};
-  const earningCategories = ['TASK', 'REFERRAL', 'DEPOSIT', 'ADMIN', 'MARKETPLACE'];
+  const earningCategories = EARNING_CATEGORIES;
   const incLifetime = earningCategories.includes(category);
 
   const balanceInc = {
@@ -180,7 +184,7 @@ const releaseHold = async (userId, amount, session) => {
       category: 'SYSTEM',
       amount,
       status: 'POSTED',
-      meta: { reason: 'hold_released' },
+      meta: { holdType: 'hold_released' },
     },
     session
   );
@@ -501,7 +505,7 @@ const reverseLedger = async (reference, reason, session) => {
   if (entry.type === 'CREDIT') {
     // Was a credit → now debit
     const decFields = { balance: -entry.amount };
-    if (entry.category === 'TASK' || entry.category === 'REFERRAL' || entry.category === 'DEPOSIT' || entry.category === 'ADMIN' || entry.category === 'MARKETPLACE') {
+    if (EARNING_CATEGORIES.includes(entry.category)) {
       decFields.lifetimeEarnings = -entry.amount;
     }
     if (entry.category === 'TASK') decFields.rewardBalance = -entry.amount;
@@ -567,7 +571,7 @@ const getBalance = async (userId) => {
 
   // Seed snapshot asynchronously (fire-and-forget to not block the caller)
   _syncSnapshot(userId, null).catch((e) =>
-    console.error('[LedgerService] Snapshot seed error:', e.message)
+    console.error('[LedgerService] Snapshot seed error:', e)
   );
 
   return {

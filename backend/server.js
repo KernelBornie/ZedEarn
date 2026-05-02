@@ -1,4 +1,5 @@
-require('dotenv').config({ path: __dirname + '/.env' });
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 // Validate critical env variables before anything else
 if (!process.env.MONGO_URI) {

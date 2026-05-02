@@ -190,10 +190,10 @@ router.post('/:id/purchase', protect, async (req, res) => {
       await session.commitTransaction();
     } catch (txErr) {
       await session.abortTransaction();
-      session.endSession();
       throw txErr;
+    } finally {
+      session.endSession();
     }
-    session.endSession();
 
     // Update item stock
     const newStock = item.stock - 1;
