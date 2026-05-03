@@ -1,11 +1,13 @@
 const express = require('express');
 const router = express.Router();
+const mongoose = require('mongoose');
 const { body, validationResult } = require('express-validator');
 const Transaction = require('../models/Transaction');
 const User = require('../models/User');
 const Notification = require('../models/Notification');
 const { protect } = require('../middleware/auth');
 const { safeEnum } = require('../utils/sanitize');
+const ledgerService = require('../services/ledgerService');
 
 const TX_TYPES = ['deposit', 'withdraw', 'task_reward', 'referral_bonus', 'cashback', 'vip_purchase', 'marketplace_sale', 'adjustment', 'transfer'];
 const TX_STATUSES = ['pending', 'completed', 'failed', 'reversed'];
@@ -150,9 +152,11 @@ router.post(
         meta: { phone: phone || req.user.phone },
       });
 
-      // Update pending balance
-      await User.findByIdAndUpdate(req.user._id, {
-        $inc: { pendingBalance: parseFloat(amount) },
+      // Record pending deposit in ledger (pendingBalance++)
+      await ledgerService.creditPending(req.user._id, parseFloat(amount), {
+        transactionId: transaction._id,
+        reference: transaction.reference,
+        method,
       });
 
       const paymentInstructions = {
@@ -216,12 +220,11 @@ router.post(
       const fee = parseFloat((withdrawAmount * feeRate).toFixed(2));
       const netAmount = parseFloat((withdrawAmount - fee).toFixed(2));
 
-      // Deduct from balance and freeze
-      await User.findByIdAndUpdate(req.user._id, {
-        $inc: {
-          balance: -withdrawAmount,
-          frozenBalance: withdrawAmount,
-        },
+      // Hold funds: debit available balance, add to frozen (via ledger)
+      await ledgerService.hold(req.user._id, withdrawAmount, 'WITHDRAWAL', {
+        method,
+        accountNumber,
+        accountName: accountName || '',
       });
 
       const transaction = await Transaction.create({

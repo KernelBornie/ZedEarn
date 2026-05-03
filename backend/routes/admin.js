@@ -8,6 +8,7 @@ const Campaign = require('../models/Campaign');
 const Notification = require('../models/Notification');
 const { protect, authorize } = require('../middleware/auth');
 const { escapeRegex, safeEnum } = require('../utils/sanitize');
+const ledgerService = require('../services/ledgerService');
 
 const adminAuth = [protect, authorize('admin', 'superadmin')];
 
@@ -194,12 +195,13 @@ router.put(
           .json({ success: false, message: 'Balance cannot go below zero' });
       }
 
-      await User.findByIdAndUpdate(req.params.id, {
-        $inc: {
-          [balanceType]: adjustAmount,
-          ...(adjustAmount > 0 ? { lifetimeEarnings: adjustAmount } : {}),
-        },
-      });
+      await ledgerService.adminAdjust(
+        req.params.id,
+        adjustAmount,
+        balanceType,
+        reason,
+        req.user._id
+      );
 
       await Transaction.create({
         userId: req.params.id,
@@ -275,16 +277,18 @@ router.put('/transactions/:id/approve', ...adminAuth, async (req, res) => {
     await transaction.save();
 
     if (transaction.type === 'deposit') {
-      await User.findByIdAndUpdate(transaction.userId, {
-        $inc: {
-          balance: transaction.netAmount,
-          pendingBalance: -transaction.amount,
-        },
-      });
+      await ledgerService.approveDeposit(
+        transaction.userId,
+        transaction.amount,
+        transaction.netAmount,
+        { transactionId: transaction._id, reference: transaction.reference }
+      );
     } else if (transaction.type === 'withdraw') {
-      await User.findByIdAndUpdate(transaction.userId, {
-        $inc: { frozenBalance: -transaction.amount },
-      });
+      await ledgerService.confirmWithdrawal(
+        transaction.userId,
+        transaction.amount,
+        { transactionId: transaction._id, reference: transaction.reference }
+      );
     }
 
     await Notification.create({
@@ -322,14 +326,14 @@ router.put('/transactions/:id/reject', ...adminAuth, async (req, res) => {
     await transaction.save();
 
     if (transaction.type === 'deposit') {
-      await User.findByIdAndUpdate(transaction.userId, {
-        $inc: { pendingBalance: -transaction.amount },
-      });
+      await ledgerService.rejectDeposit(
+        transaction.userId,
+        transaction.amount,
+        { transactionId: transaction._id, reference: transaction.reference, reason }
+      );
     } else if (transaction.type === 'withdraw') {
       // Refund frozen balance back to main balance
-      await User.findByIdAndUpdate(transaction.userId, {
-        $inc: { balance: transaction.amount, frozenBalance: -transaction.amount },
-      });
+      await ledgerService.releaseHold(transaction.userId, transaction.amount);
     }
 
     await Notification.create({

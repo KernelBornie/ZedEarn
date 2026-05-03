@@ -1,4 +1,23 @@
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
+
+// Validate critical env variables before anything else
+if (!process.env.MONGO_URI) {
+  console.error('❌ FATAL: MONGO_URI is not defined in .env');
+  console.error('   Make sure .env exists at:', __dirname + '/.env');
+  console.error('   Expected variable: MONGO_URI=mongodb+srv://...');
+  process.exit(1);
+}
+if (!process.env.JWT_SECRET) {
+  console.error('❌ FATAL: JWT_SECRET is not defined in .env');
+  process.exit(1);
+}
+
+console.log('✅ Environment loaded');
+console.log('   MONGO_URI:', process.env.MONGO_URI ? '[SET]' : '[MISSING]');
+console.log('   JWT_SECRET:', process.env.JWT_SECRET ? '[SET]' : '[MISSING]');
+console.log('   NODE_ENV:', process.env.NODE_ENV || 'development');
+
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -26,8 +45,7 @@ const adminRoutes = require('./routes/admin');
 const notificationRoutes = require('./routes/notifications');
 const supportRoutes = require('./routes/support');
 
-// Connect to databases
-connectDB();
+// DB connection will be established in startServer() below
 
 const app = express();
 const server = http.createServer(app);
@@ -182,6 +200,7 @@ const TaskCompletion = require('./models/TaskCompletion');
 const User = require('./models/User');
 const Transaction = require('./models/Transaction');
 const Notification = require('./models/Notification');
+const ledgerService = require('./services/ledgerService');
 
 // Daily midnight: reset daily task completion counts (soft reset by flagging old records)
 cron.schedule('0 0 * * *', async () => {
@@ -232,8 +251,10 @@ cron.schedule('*/30 * * * *', async () => {
       tx.meta = { ...tx.meta, staleFlagged: true, flaggedAt: new Date() };
       await tx.save();
 
-      await User.findByIdAndUpdate(tx.userId, {
-        $inc: { pendingBalance: -tx.amount },
+      await ledgerService.rejectDeposit(tx.userId, tx.amount, {
+        reason: 'stale_deposit',
+        flaggedAt: new Date(),
+        reference: tx.reference,
       });
 
       await Notification.create({
@@ -254,12 +275,18 @@ cron.schedule('*/30 * * * *', async () => {
 
 // ─── Start Server ─────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 5001;
-server.listen(PORT, () => {
-  console.log(`\n🚀 ZedEarn Backend running on port ${PORT}`);
-  console.log(`   Environment : ${process.env.NODE_ENV || 'development'}`);
-  console.log(`   API Base    : http://localhost:${PORT}/api`);
-  console.log(`   Health      : http://localhost:${PORT}/health\n`);
-});
+
+const startServer = async () => {
+  await connectDB();
+  server.listen(PORT, () => {
+    console.log(`\n🚀 ZedEarn Backend running on port ${PORT}`);
+    console.log(`   Environment : ${process.env.NODE_ENV || 'development'}`);
+    console.log(`   API Base    : http://localhost:${PORT}/api`);
+    console.log(`   Health      : http://localhost:${PORT}/health\n`);
+  });
+};
+
+startServer();
 
 // Graceful shutdown
 process.on('unhandledRejection', (err) => {
