@@ -477,8 +477,10 @@ router.get('/reports/export', ...adminAuth, async (req, res) => {
   try {
     const { type, startDate, endDate, status } = req.query;
     const query = {};
-    if (type) query.type = type;
-    if (status) query.status = status;
+    const safeType = safeEnum(type, TX_TYPES);
+    const safeStatus = safeEnum(status, TX_STATUSES);
+    if (safeType) query.type = safeType;
+    if (safeStatus) query.status = safeStatus;
     if (startDate || endDate) {
       query.createdAt = {};
       if (startDate) query.createdAt.$gte = new Date(startDate);

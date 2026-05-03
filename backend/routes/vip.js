@@ -98,7 +98,7 @@ router.post(
       const newTierIdx = VIP_TIERS.indexOf(safePlanName);
       const finalTier = VIP_TIERS[Math.max(currentTierIdx, newTierIdx)];
 
-      // Deduct balance via ledger, then update VIP fields separately
+      // Deduct balance via ledger, then update VIP metadata separately
       await ledgerService.debit(req.user._id, plan.price, 'VIP', {
         planName: safePlanName,
         duration: plan.duration,
