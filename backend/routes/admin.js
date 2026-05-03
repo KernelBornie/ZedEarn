@@ -9,12 +9,14 @@ const Notification = require('../models/Notification');
 const { protect, authorize } = require('../middleware/auth');
 const { escapeRegex, safeEnum } = require('../utils/sanitize');
 const ledgerService = require('../services/ledgerService');
+const paymentService = require('../services/payments/paymentService');
+const logger = require('../utils/logger');
 
 const adminAuth = [protect, authorize('admin', 'superadmin')];
 
 const USER_ROLES = ['guest', 'user', 'vip', 'agent', 'merchant', 'support', 'admin', 'superadmin'];
 const TX_TYPES = ['deposit', 'withdraw', 'task_reward', 'referral_bonus', 'cashback', 'vip_purchase', 'marketplace_sale', 'adjustment', 'transfer'];
-const TX_STATUSES = ['pending', 'completed', 'failed', 'reversed'];
+const TX_STATUSES = ['pending', 'processing', 'completed', 'failed', 'reversed'];
 const TASK_TYPES = ['product', 'survey', 'adwatch', 'sponsored', 'daily_checkin', 'weekly_mission', 'referral', 'team'];
 const TASK_STATUSES = ['active', 'inactive', 'expired'];
 const CAMPAIGN_STATUSES = ['draft', 'active', 'paused', 'completed'];
@@ -272,36 +274,133 @@ router.put('/transactions/:id/approve', ...adminAuth, async (req, res) => {
         .json({ success: false, message: 'Only pending transactions can be approved' });
     }
 
-    transaction.status = 'completed';
-    transaction.processedAt = new Date();
-    await transaction.save();
-
     if (transaction.type === 'deposit') {
+      // Deposit approvals don't trigger an outbound payment — just credit the ledger
+      transaction.status = 'completed';
+      transaction.processedAt = new Date();
+      await transaction.save();
+
       await ledgerService.approveDeposit(
         transaction.userId,
         transaction.amount,
         transaction.netAmount,
         { transactionId: transaction._id, reference: transaction.reference }
       );
+
+      logger.info('[Admin] Deposit approved', {
+        adminId: req.user._id,
+        transactionId: transaction._id,
+        reference: transaction.reference,
+      });
     } else if (transaction.type === 'withdraw') {
-      await ledgerService.confirmWithdrawal(
-        transaction.userId,
-        transaction.amount,
-        { transactionId: transaction._id, reference: transaction.reference }
-      );
+      // Withdrawal approval: set to 'processing', trigger payment API
+      transaction.status = 'processing';
+      transaction.processedAt = new Date();
+      await transaction.save();
+
+      logger.info('[Admin] Withdrawal approved — triggering payment', {
+        adminId: req.user._id,
+        transactionId: transaction._id,
+        reference: transaction.reference,
+        method: transaction.method,
+      });
+
+      let paymentResult = null;
+      try {
+        paymentResult = await paymentService.initiateWithdrawal(
+          transaction.method,
+          transaction
+        );
+      } catch (payErr) {
+        logger.error('[Admin] Payment initiation failed — rolling back to pending', {
+          error: payErr.message,
+          transactionId: transaction._id,
+          reference: transaction.reference,
+        });
+        // Roll back to pending so admin can retry
+        transaction.status = 'pending';
+        transaction.meta = { ...transaction.meta, lastPaymentError: payErr.message };
+        await transaction.save();
+        return res.status(502).json({
+          success: false,
+          message: `Payment initiation failed: ${payErr.message}. Transaction returned to pending.`,
+        });
+      }
+
+      if (paymentResult.success || paymentResult.status === 'pending') {
+        // Payment accepted (may still be async/pending on provider side)
+        transaction.status = paymentResult.status === 'success' ? 'completed' : 'processing';
+        transaction.providerRef = paymentResult.providerRef;
+        transaction.meta = {
+          ...transaction.meta,
+          providerRef: paymentResult.providerRef,
+          paymentMessage: paymentResult.message,
+        };
+        await transaction.save();
+
+        if (transaction.status === 'completed') {
+          await ledgerService.confirmWithdrawal(
+            transaction.userId,
+            transaction.amount,
+            { transactionId: transaction._id, reference: transaction.reference }
+          );
+        }
+
+        logger.info('[Admin] Withdrawal payment initiated', {
+          transactionId: transaction._id,
+          reference: transaction.reference,
+          paymentStatus: paymentResult.status,
+          providerRef: paymentResult.providerRef,
+        });
+      } else {
+        // Payment failed — release hold and mark failed
+        transaction.status = 'failed';
+        transaction.meta = {
+          ...transaction.meta,
+          providerRef: paymentResult.providerRef,
+          paymentFailureReason: paymentResult.message,
+        };
+        await transaction.save();
+
+        await ledgerService.releaseHold(transaction.userId, transaction.amount);
+
+        logger.warn('[Admin] Withdrawal payment failed', {
+          transactionId: transaction._id,
+          reference: transaction.reference,
+          reason: paymentResult.message,
+        });
+
+        await Notification.create({
+          userId: transaction.userId,
+          title: 'Withdrawal Failed',
+          message: `Your withdrawal of ZMW ${transaction.amount.toFixed(2)} could not be processed: ${paymentResult.message}. Funds have been returned to your balance.`,
+          type: 'error',
+          link: '/wallet/transactions',
+        });
+
+        return res.status(200).json({
+          success: false,
+          message: `Payment failed: ${paymentResult.message}. Funds returned to user balance.`,
+          transaction,
+        });
+      }
+    } else {
+      transaction.status = 'completed';
+      transaction.processedAt = new Date();
+      await transaction.save();
     }
 
     await Notification.create({
       userId: transaction.userId,
       title: 'Transaction Approved',
-      message: `Your ${transaction.type.replace(/_/g, ' ')} of ZMW ${transaction.netAmount.toFixed(2)} has been approved.`,
+      message: `Your ${transaction.type.replace(/_/g, ' ')} of ZMW ${(transaction.netAmount || transaction.amount).toFixed(2)} has been approved.`,
       type: 'success',
       link: '/wallet/transactions',
     });
 
     res.json({ success: true, message: 'Transaction approved', transaction });
   } catch (err) {
-    console.error(err);
+    logger.error('[Admin] Approve transaction error', { error: err.message, transactionId: req.params.id });
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
@@ -336,6 +435,13 @@ router.put('/transactions/:id/reject', ...adminAuth, async (req, res) => {
       await ledgerService.releaseHold(transaction.userId, transaction.amount);
     }
 
+    logger.info('[Admin] Transaction rejected', {
+      adminId: req.user._id,
+      transactionId: transaction._id,
+      reference: transaction.reference,
+      reason,
+    });
+
     await Notification.create({
       userId: transaction.userId,
       title: 'Transaction Rejected',
@@ -346,7 +452,7 @@ router.put('/transactions/:id/reject', ...adminAuth, async (req, res) => {
 
     res.json({ success: true, message: 'Transaction rejected', transaction });
   } catch (err) {
-    console.error(err);
+    logger.error('[Admin] Reject transaction error', { error: err.message, transactionId: req.params.id });
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });

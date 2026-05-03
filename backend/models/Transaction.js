@@ -46,8 +46,19 @@ const TransactionSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ['pending', 'completed', 'failed', 'reversed'],
+      enum: ['pending', 'processing', 'completed', 'failed', 'reversed'],
       default: 'pending',
+    },
+
+    idempotencyKey: {
+      type: String,
+      sparse: true,
+      index: true,
+    },
+
+    providerRef: {
+      type: String,
+      default: null,
     },
 
     reference: {
@@ -87,6 +98,14 @@ TransactionSchema.index(
     unique: true,
     sparse: true,
     partialFilterExpression: { reference: { $exists: true, $ne: null } }
+  }
+);
+TransactionSchema.index(
+  { idempotencyKey: 1 },
+  {
+    unique: true,
+    sparse: true,
+    partialFilterExpression: { idempotencyKey: { $exists: true, $ne: null } }
   }
 );
 
