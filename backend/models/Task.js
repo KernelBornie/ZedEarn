@@ -15,74 +15,37 @@ const TaskSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: [
-        'product',
-        'survey',
-        'adwatch',
-        'sponsored',
-        'daily_checkin',
-        'weekly_mission',
-        'referral',
-        'team',
-      ],
-      default: 'product',
+      enum: ['ad_watch', 'survey', 'daily_checkin', 'referral', 'mission'],
+      required: [true, 'Task type is required'],
     },
     reward: {
       type: Number,
       required: [true, 'Reward amount is required'],
       min: [0, 'Reward cannot be negative'],
     },
-    currency: {
-      type: String,
-      default: 'ZMW',
-    },
-    image: {
-      type: String,
-      default: null,
-    },
-    vipRequired: {
-      type: String,
-      enum: ['none', 'silver', 'gold', 'platinum', 'diamond'],
-      default: 'none',
-    },
-    dailyLimit: {
+    maxCompletionsPerUser: {
       type: Number,
-      default: 10,
-      min: 1,
+      default: 1,
+      min: 0,
     },
-    cooldownMinutes: {
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
+    vipOnly: {
+      type: Boolean,
+      default: false,
+    },
+    cooldownHours: {
       type: Number,
       default: 0,
       min: 0,
-    },
-    status: {
-      type: String,
-      enum: ['active', 'inactive', 'expired'],
-      default: 'active',
-    },
-    sponsorId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      default: null,
-    },
-    totalCompleted: {
-      type: Number,
-      default: 0,
-    },
-    tags: {
-      type: [String],
-      default: [],
-    },
-    expiresAt: {
-      type: Date,
-      default: null,
     },
   },
   { timestamps: true }
 );
 
-TaskSchema.index({ status: 1, type: 1 });
-TaskSchema.index({ vipRequired: 1 });
-TaskSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0, sparse: true });
+TaskSchema.index({ isActive: 1, type: 1 });
+TaskSchema.index({ vipOnly: 1 });
 
 module.exports = mongoose.model('Task', TaskSchema);

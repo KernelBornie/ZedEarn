@@ -59,6 +59,59 @@ async function seed() {
 
     console.log(`Users seeded: ${users.length}`);
 
+    const tasks = await Task.insertMany([
+      {
+        title: 'Daily Check-in',
+        description: 'Check in once every day to earn a reward.',
+        type: 'daily_checkin',
+        reward: 1,
+        maxCompletionsPerUser: 0,
+        isActive: true,
+        vipOnly: false,
+        cooldownHours: 24,
+      },
+      {
+        title: 'Watch Ad',
+        description: 'Watch a sponsored ad to earn a quick reward.',
+        type: 'ad_watch',
+        reward: 2,
+        maxCompletionsPerUser: 0,
+        isActive: true,
+        vipOnly: false,
+        cooldownHours: 1,
+      },
+      {
+        title: 'Complete Survey',
+        description: 'Complete a short survey and get paid instantly.',
+        type: 'survey',
+        reward: 5,
+        maxCompletionsPerUser: 1,
+        isActive: true,
+        vipOnly: false,
+      },
+      {
+        title: 'Weekly Mission',
+        description: 'Finish the weekly mission for a bigger payout.',
+        type: 'mission',
+        reward: 20,
+        maxCompletionsPerUser: 0,
+        isActive: true,
+        vipOnly: false,
+        cooldownHours: 168,
+      },
+      {
+        title: 'Referral Bonus Task',
+        description: 'Earn a bonus for completing a referral.',
+        type: 'referral',
+        reward: 10,
+        maxCompletionsPerUser: 1,
+        isActive: true,
+        vipOnly: false,
+      },
+    ]);
+
+    console.log(`Tasks seeded: ${tasks.length}`);
+
     console.log('\n✅ SEED COMPLETE (STABLE VERSION)\n');
 
     await mongoose.disconnect();
