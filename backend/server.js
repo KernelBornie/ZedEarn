@@ -1,6 +1,7 @@
+const path = require('path');
 const fs = require('fs');
 
-const envPath = require('path').resolve(__dirname, '.env');
+const envPath = path.resolve(__dirname, '.env');
 
 if (!fs.existsSync(envPath)) {
   console.warn('Missing backend/.env file — create it before running backend');
@@ -8,7 +9,7 @@ if (!fs.existsSync(envPath)) {
 }
 
 require('dotenv').config({
-  path: require('path').resolve(__dirname, '.env'),
+  path: envPath,
 });
 
 console.log("🔧 ZedEarn ENV CHECK");
