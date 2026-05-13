@@ -16,8 +16,13 @@ console.log("MONGO_URI:", process.env.MONGO_URI);
 console.log("REDIS_URL:", process.env.REDIS_URL);
 console.log("PORT:", process.env.PORT);
 
-const hasMongoPlaceholders = (value) =>
-  /<user>|<password>|<cluster-id>/i.test(value);
+const containsMongoPlaceholders = (value) => {
+  if (!value) {
+    return false;
+  }
+
+  return /<[^>]+>/.test(value);
+};
 
 const validateEnv = () => {
   if (!process.env.MONGO_URI) {
@@ -25,7 +30,7 @@ const validateEnv = () => {
     return false;
   }
 
-  if (hasMongoPlaceholders(process.env.MONGO_URI)) {
+  if (containsMongoPlaceholders(process.env.MONGO_URI)) {
     console.error(
       '❌ MONGO_URI contains placeholder values. Update backend/.env with real credentials.'
     );
