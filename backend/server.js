@@ -17,20 +17,12 @@ console.log("REDIS_URL:", process.env.REDIS_URL);
 console.log("PORT:", process.env.PORT);
 
 const validateEnv = () => {
-  const hasPlaceholderSyntax = (value) => {
-    if (!value) {
-      return false;
-    }
-
-    return /<[^>]+>/.test(value);
-  };
-
   if (!process.env.MONGO_URI) {
     console.error('❌ Missing MONGO_URI in backend/.env');
     return false;
   }
 
-  if (hasPlaceholderSyntax(process.env.MONGO_URI)) {
+  if (/<[^>]+>/.test(process.env.MONGO_URI)) {
     console.error(
       '❌ MONGO_URI contains placeholder values (e.g., <user>, <password>, <cluster-id>). Update backend/.env with real credentials.'
     );
