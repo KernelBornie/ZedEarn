@@ -117,7 +117,7 @@ export default function Tasks() {
               const msg = messages[task._id];
               const status = task.userStatus || {};
               const remaining = status.remainingAvailability;
-              const remainingLabel = remaining === null ? 'Unlimited' : remaining;
+              const remainingLabel = remaining === null ? 'Unlimited' : remaining === 0 ? 'No uses left' : remaining;
               const cooldownLabel = task.cooldownHours > 0 ? `${task.cooldownHours}h` : 'None';
               const isDisabled = completing[task._id] || msg?.type === 'success' || !status.canComplete;
               return (

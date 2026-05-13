@@ -7,7 +7,6 @@ const Transaction = require('../models/Transaction');
 const Notification = require('../models/Notification');
 const User = require('../models/User');
 const { protect, authorize } = require('../middleware/auth');
-const { safeEnum } = require('../utils/sanitize');
 const ledgerService = require('../services/ledgerService');
 
 const router = express.Router();
@@ -33,7 +32,7 @@ router.get('/', protect, async (req, res) => {
   try {
     const { type } = req.query;
     const query = { isActive: true };
-    const safeType = safeEnum(type, TASK_TYPES);
+    const safeType = typeof type === 'string' && TASK_TYPES.includes(type) ? type : null;
     if (safeType) query.type = safeType;
 
     const tasks = await Task.find(query).sort({ reward: -1, createdAt: -1 });
@@ -108,6 +107,9 @@ router.get('/', protect, async (req, res) => {
 // GET /api/tasks/:id
 router.get('/:id', protect, async (req, res) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ success: false, message: 'Invalid ID format' });
+    }
     const task = await Task.findById(req.params.id);
     if (!task) return res.status(404).json({ success: false, message: 'Task not found' });
     res.json({ success: true, task });
@@ -154,6 +156,9 @@ router.post(
 // PUT /api/tasks/:id - admin update
 router.put('/:id', protect, authorize('admin', 'superadmin', 'merchant'), async (req, res) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ success: false, message: 'Invalid ID format' });
+    }
     const { title, description, type, reward, maxCompletionsPerUser, isActive, vipOnly, cooldownHours } = req.body;
     const updates = {};
     if (title !== undefined) updates.title = title;
@@ -179,6 +184,9 @@ router.put('/:id', protect, authorize('admin', 'superadmin', 'merchant'), async 
 // DELETE /api/tasks/:id - admin
 router.delete('/:id', protect, authorize('admin', 'superadmin'), async (req, res) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ success: false, message: 'Invalid ID format' });
+    }
     const task = await Task.findByIdAndDelete(req.params.id);
     if (!task) return res.status(404).json({ success: false, message: 'Task not found' });
     res.json({ success: true, message: 'Task deleted' });
@@ -188,6 +196,11 @@ router.delete('/:id', protect, authorize('admin', 'superadmin'), async (req, res
 });
 
 const completeTaskHandler = async (req, res) => {
+  const taskId = req.params.taskId || req.params.id;
+  if (!mongoose.Types.ObjectId.isValid(taskId)) {
+    return res.status(400).json({ success: false, message: 'Invalid ID format' });
+  }
+
   const session = await mongoose.startSession();
   try {
     let task;
@@ -196,7 +209,7 @@ const completeTaskHandler = async (req, res) => {
     let wallet;
 
     await session.withTransaction(async () => {
-      task = await Task.findById(req.params.taskId || req.params.id).session(session);
+      task = await Task.findById(taskId).session(session);
       if (!task) throw createError(404, 'Task not found');
       if (!task.isActive) throw createError(400, 'Task is not active');
 
