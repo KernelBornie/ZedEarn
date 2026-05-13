@@ -1,22 +1,19 @@
-const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '.env') });
+require('dotenv').config({ path: __dirname + '/.env' });
 
-// Validate critical env variables before anything else
+console.log("🔧 ZedEarn ENV CHECK");
+console.log("MONGO_URI:", process.env.MONGO_URI);
+console.log("REDIS_URL:", process.env.REDIS_URL);
+console.log("PORT:", process.env.PORT);
+
 if (!process.env.MONGO_URI) {
-  console.error('❌ FATAL: MONGO_URI is not defined in .env');
-  console.error('   Make sure .env exists at:', __dirname + '/.env');
-  console.error('   Expected variable: MONGO_URI=mongodb+srv://...');
+  console.error("❌ Missing MONGO_URI in backend/.env");
   process.exit(1);
 }
+
 if (!process.env.JWT_SECRET) {
   console.error('❌ FATAL: JWT_SECRET is not defined in .env');
   process.exit(1);
 }
-
-console.log('✅ Environment loaded');
-console.log('   MONGO_URI:', process.env.MONGO_URI ? '[SET]' : '[MISSING]');
-console.log('   JWT_SECRET:', process.env.JWT_SECRET ? '[SET]' : '[MISSING]');
-console.log('   NODE_ENV:', process.env.NODE_ENV || 'development');
 
 const cron = require('node-cron');
 
