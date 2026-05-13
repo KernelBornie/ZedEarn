@@ -465,6 +465,7 @@ router.get('/tasks', ...adminAuth, async (req, res) => {
     if (typeof isActive !== 'undefined') {
       query.isActive = isActive === 'true' || isActive === true;
     } else if (status === 'active' || status === 'inactive') {
+      // Legacy support: map old status query to new isActive field
       query.isActive = status === 'active';
     }
     if (safeType) query.type = safeType;

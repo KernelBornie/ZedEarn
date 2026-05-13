@@ -120,6 +120,11 @@ export default function Tasks() {
               const remainingLabel = remaining === null ? 'Unlimited' : remaining === 0 ? 'No uses left' : remaining;
               const cooldownLabel = task.cooldownHours > 0 ? `${task.cooldownHours}h` : 'None';
               const isDisabled = completing[task._id] || msg?.type === 'success' || !status.canComplete;
+              let buttonLabel = 'Unavailable';
+              if (msg?.type === 'success') buttonLabel = '✓ Completed';
+              else if (status.canComplete) buttonLabel = 'Complete Task';
+              else if (status.vipBlocked) buttonLabel = 'VIP Only';
+              else if (status.isCompleted) buttonLabel = 'Completed';
               return (
                 <div key={task._id} className="task-card">
                   <p className="task-title">{task.title}</p>
@@ -152,17 +157,7 @@ export default function Tasks() {
                     onClick={() => completeTask(task._id)}
                     disabled={isDisabled}
                   >
-                    {completing[task._id]
-                      ? <span className="spinner" />
-                      : msg?.type === 'success'
-                        ? '✓ Completed'
-                        : status.canComplete
-                          ? 'Complete Task'
-                          : status.vipBlocked
-                            ? 'VIP Only'
-                            : status.isCompleted
-                              ? 'Completed'
-                              : 'Unavailable'}
+                    {completing[task._id] ? <span className="spinner" /> : buttonLabel}
                   </button>
                 </div>
               );

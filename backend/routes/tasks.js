@@ -110,7 +110,8 @@ router.get('/:id', protect, async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({ success: false, message: 'Invalid ID format' });
     }
-    const task = await Task.findById(req.params.id);
+    const taskId = new mongoose.Types.ObjectId(req.params.id);
+    const task = await Task.findById(taskId);
     if (!task) return res.status(404).json({ success: false, message: 'Task not found' });
     res.json({ success: true, task });
   } catch (err) {
@@ -159,6 +160,7 @@ router.put('/:id', protect, authorize('admin', 'superadmin', 'merchant'), async 
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({ success: false, message: 'Invalid ID format' });
     }
+    const taskId = new mongoose.Types.ObjectId(req.params.id);
     const { title, description, type, reward, maxCompletionsPerUser, isActive, vipOnly, cooldownHours } = req.body;
     const updates = {};
     if (title !== undefined) updates.title = title;
@@ -170,7 +172,7 @@ router.put('/:id', protect, authorize('admin', 'superadmin', 'merchant'), async 
     if (vipOnly !== undefined) updates.vipOnly = vipOnly;
     if (cooldownHours !== undefined) updates.cooldownHours = cooldownHours;
 
-    const task = await Task.findByIdAndUpdate(req.params.id, updates, {
+    const task = await Task.findByIdAndUpdate(taskId, updates, {
       new: true,
       runValidators: true,
     });
@@ -187,7 +189,8 @@ router.delete('/:id', protect, authorize('admin', 'superadmin'), async (req, res
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({ success: false, message: 'Invalid ID format' });
     }
-    const task = await Task.findByIdAndDelete(req.params.id);
+    const taskId = new mongoose.Types.ObjectId(req.params.id);
+    const task = await Task.findByIdAndDelete(taskId);
     if (!task) return res.status(404).json({ success: false, message: 'Task not found' });
     res.json({ success: true, message: 'Task deleted' });
   } catch (err) {
@@ -195,12 +198,12 @@ router.delete('/:id', protect, authorize('admin', 'superadmin'), async (req, res
   }
 });
 
-const completeTaskHandler = async (req, res) => {
-  const taskId = req.params.taskId || req.params.id;
+const completeTaskHandler = async (req, res, taskId) => {
   if (!mongoose.Types.ObjectId.isValid(taskId)) {
     return res.status(400).json({ success: false, message: 'Invalid ID format' });
   }
 
+  const taskObjectId = new mongoose.Types.ObjectId(taskId);
   const session = await mongoose.startSession();
   try {
     let task;
@@ -209,7 +212,7 @@ const completeTaskHandler = async (req, res) => {
     let wallet;
 
     await session.withTransaction(async () => {
-      task = await Task.findById(taskId).session(session);
+      task = await Task.findById(taskObjectId).session(session);
       if (!task) throw createError(404, 'Task not found');
       if (!task.isActive) throw createError(400, 'Task is not active');
 
@@ -345,9 +348,9 @@ const completeTaskHandler = async (req, res) => {
 };
 
 // POST /api/tasks/complete/:taskId - user completes a task
-router.post('/complete/:taskId', protect, completeTaskHandler);
+router.post('/complete/:taskId', protect, (req, res) => completeTaskHandler(req, res, req.params.taskId));
 
 // Legacy endpoint support
-router.post('/:id/complete', protect, completeTaskHandler);
+router.post('/:id/complete', protect, (req, res) => completeTaskHandler(req, res, req.params.id));
 
 module.exports = router;
