@@ -1,17 +1,43 @@
-require('dotenv').config({ path: __dirname + '/.env' });
+const path = require('path');
+
+const dotenvResult = require('dotenv').config({
+  path: path.resolve(__dirname, '.env'),
+});
+
+if (dotenvResult.error) {
+  console.warn(
+    '⚠️  dotenv could not load backend/.env; falling back to process env:',
+    dotenvResult.error.message
+  );
+}
 
 console.log("🔧 ZedEarn ENV CHECK");
 console.log("MONGO_URI:", process.env.MONGO_URI);
 console.log("REDIS_URL:", process.env.REDIS_URL);
 console.log("PORT:", process.env.PORT);
 
-if (!process.env.MONGO_URI) {
-  console.error("❌ Missing MONGO_URI in backend/.env");
-  process.exit(1);
-}
+const validateEnv = () => {
+  if (!process.env.MONGO_URI) {
+    console.error('❌ Missing MONGO_URI in backend/.env');
+    return false;
+  }
 
-if (!process.env.JWT_SECRET) {
-  console.error('❌ FATAL: JWT_SECRET is not defined in .env');
+  if (/<[^>]+>/.test(process.env.MONGO_URI)) {
+    console.error(
+      '❌ MONGO_URI contains placeholder values (e.g., <user>, <password>, <cluster-id>). Update backend/.env with real credentials.'
+    );
+    return false;
+  }
+
+  if (!process.env.JWT_SECRET) {
+    console.error('❌ FATAL: JWT_SECRET is not defined in .env');
+    return false;
+  }
+
+  return true;
+};
+
+if (!validateEnv()) {
   process.exit(1);
 }
 
