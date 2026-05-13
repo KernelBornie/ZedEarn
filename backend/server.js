@@ -1,15 +1,15 @@
-const path = require('path');
+const fs = require('fs');
 
-const dotenvResult = require('dotenv').config({
-  path: path.resolve(__dirname, '.env'),
-});
+const envPath = require('path').resolve(__dirname, '.env');
 
-if (dotenvResult.error) {
-  console.warn(
-    '⚠️  dotenv could not load backend/.env; falling back to process env:',
-    dotenvResult.error.message
-  );
+if (!fs.existsSync(envPath)) {
+  console.warn('Missing backend/.env file — create it before running backend');
+  process.exit(1);
 }
+
+require('dotenv').config({
+  path: require('path').resolve(__dirname, '.env'),
+});
 
 console.log("🔧 ZedEarn ENV CHECK");
 console.log("MONGO_URI:", process.env.MONGO_URI);
@@ -26,11 +26,6 @@ const validateEnv = () => {
     console.error(
       '❌ MONGO_URI contains placeholder values (e.g., <user>, <password>, <cluster-id>). Update backend/.env with real credentials.'
     );
-    return false;
-  }
-
-  if (!process.env.JWT_SECRET) {
-    console.error('❌ FATAL: JWT_SECRET is not defined in .env');
     return false;
   }
 
