@@ -16,15 +16,15 @@ console.log("MONGO_URI:", process.env.MONGO_URI);
 console.log("REDIS_URL:", process.env.REDIS_URL);
 console.log("PORT:", process.env.PORT);
 
-const hasPlaceholderSyntax = (value) => {
-  if (!value) {
-    return false;
-  }
-
-  return /<[^>]+>/.test(value);
-};
-
 const validateEnv = () => {
+  const hasPlaceholderSyntax = (value) => {
+    if (!value) {
+      return false;
+    }
+
+    return /<[^>]+>/.test(value);
+  };
+
   if (!process.env.MONGO_URI) {
     console.error('❌ Missing MONGO_URI in backend/.env');
     return false;
