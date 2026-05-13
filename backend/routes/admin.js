@@ -17,8 +17,7 @@ const adminAuth = [protect, authorize('admin', 'superadmin')];
 const USER_ROLES = ['guest', 'user', 'vip', 'agent', 'merchant', 'support', 'admin', 'superadmin'];
 const TX_TYPES = ['deposit', 'withdraw', 'task_reward', 'referral_bonus', 'cashback', 'vip_purchase', 'marketplace_sale', 'adjustment', 'transfer'];
 const TX_STATUSES = ['pending', 'processing', 'completed', 'failed', 'reversed'];
-const TASK_TYPES = ['product', 'survey', 'adwatch', 'sponsored', 'daily_checkin', 'weekly_mission', 'referral', 'team'];
-const TASK_STATUSES = ['active', 'inactive', 'expired'];
+const TASK_TYPES = ['ad_watch', 'survey', 'daily_checkin', 'referral', 'mission'];
 const CAMPAIGN_STATUSES = ['draft', 'active', 'paused', 'completed'];
 
 // GET /api/admin/analytics
@@ -460,11 +459,15 @@ router.put('/transactions/:id/reject', ...adminAuth, async (req, res) => {
 // GET /api/admin/tasks
 router.get('/tasks', ...adminAuth, async (req, res) => {
   try {
-    const { page = 1, limit = 20, status, type } = req.query;
+    const { page = 1, limit = 20, status, type, isActive } = req.query;
     const query = {};
-    const safeStatus = safeEnum(status, TASK_STATUSES);
     const safeType = safeEnum(type, TASK_TYPES);
-    if (safeStatus) query.status = safeStatus;
+    if (typeof isActive !== 'undefined') {
+      query.isActive = isActive === 'true' || isActive === true;
+    } else if (status === 'active' || status === 'inactive') {
+      // Legacy support: map old status query to new isActive field
+      query.isActive = status === 'active';
+    }
     if (safeType) query.type = safeType;
 
     const total = await Task.countDocuments(query);

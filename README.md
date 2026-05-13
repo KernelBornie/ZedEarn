@@ -157,7 +157,7 @@ After running `npm run seed` in the backend:
 | POST   | `/api/auth/login`         | Login                        |
 | GET    | `/api/auth/me`            | Get current user             |
 | GET    | `/api/tasks`              | List available tasks         |
-| POST   | `/api/tasks/:id/complete` | Complete a task              |
+| POST   | `/api/tasks/complete/:taskId` | Complete a task          |
 | GET    | `/api/wallet`             | Wallet balances + recent tx  |
 | GET    | `/api/wallet/transactions`| Transaction history          |
 | POST   | `/api/wallet/recharge`    | Initiate a deposit           |

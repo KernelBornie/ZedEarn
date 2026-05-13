@@ -61,6 +61,7 @@ input:focus, select:focus, textarea:focus { border-color: #6c63ff; }
 .badge-gold     { background: #fbbf24; color: #7c5700; }
 .badge-platinum { background: #9333ea; color: #fff; }
 .badge-diamond  { background: linear-gradient(135deg,#06b6d4,#8b5cf6); color: #fff; }
+.badge-vip      { background: #fde68a; color: #92400e; }
 
 .error-msg { color: #ef4444; font-size: 0.88rem; margin-top: 6px; }
 .success-msg { color: #22c55e; font-size: 0.88rem; margin-top: 6px; }
