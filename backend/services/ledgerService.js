@@ -46,6 +46,24 @@ const _createEntry = async (data, session) => {
   return entry;
 };
 
+const _reverseEntry = async (entryId, reason, session) => {
+  const opts = session ? { session } : {};
+  await WalletLedger.findByIdAndUpdate(
+    entryId,
+    {
+      status: 'REVERSED',
+      'meta.reversalReason': reason,
+      'meta.reversedAt': new Date(),
+    },
+    opts
+  );
+};
+
+const _updateUser = async (filter, update, session) => {
+  const opts = session ? { session, new: true } : { new: true };
+  return User.findOneAndUpdate(filter, update, opts);
+};
+
 // ─── CREDIT ───────────────────────────────────────────────────────────────────
 /**
  * Credit a user's available balance.
@@ -62,7 +80,6 @@ const _createEntry = async (data, session) => {
 const credit = async (userId, amount, category, meta = {}, session) => {
   if (!amount || amount <= 0) throw new Error('Credit amount must be positive');
 
-  const opts = session ? { session } : {};
   const earningCategories = EARNING_CATEGORIES;
   const incLifetime = earningCategories.includes(category);
 
@@ -77,7 +94,12 @@ const credit = async (userId, amount, category, meta = {}, session) => {
     session
   );
 
-  await User.findByIdAndUpdate(userId, { $inc: balanceInc }, opts);
+  const updatedUser = await _updateUser({ _id: userId }, { $inc: balanceInc }, session);
+  if (!updatedUser) {
+    await _reverseEntry(ledgerEntry._id, 'user_not_found', session);
+    throw new Error(`User ${userId} not found`);
+  }
+
   await _syncSnapshot(userId, session);
   return ledgerEntry;
 };
@@ -97,21 +119,24 @@ const credit = async (userId, amount, category, meta = {}, session) => {
 const debit = async (userId, amount, category, meta = {}, session) => {
   if (!amount || amount <= 0) throw new Error('Debit amount must be positive');
 
-  const opts = session ? { session } : {};
-  const user = await User.findById(userId).session(session || null);
-  if (!user) throw new Error(`User ${userId} not found`);
-  if (user.balance < amount) {
-    throw new Error(
-      `Insufficient balance. Available: ZMW ${user.balance.toFixed(2)}, Required: ZMW ${amount.toFixed(2)}`
-    );
-  }
-
   const ledgerEntry = await _createEntry(
     { userId, type: 'DEBIT', category, amount, status: 'POSTED', meta },
     session
   );
 
-  await User.findByIdAndUpdate(userId, { $inc: { balance: -amount } }, opts);
+  const updatedUser = await _updateUser(
+    { _id: userId, balance: { $gte: amount } },
+    { $inc: { balance: -amount } },
+    session
+  );
+
+  if (!updatedUser) {
+    await _reverseEntry(ledgerEntry._id, 'insufficient_balance', session);
+    throw new Error(
+      `Insufficient balance. Required: ZMW ${amount.toFixed(2)}`
+    );
+  }
+
   await _syncSnapshot(userId, session);
   return ledgerEntry;
 };
@@ -131,15 +156,6 @@ const debit = async (userId, amount, category, meta = {}, session) => {
 const hold = async (userId, amount, category, meta = {}, session) => {
   if (!amount || amount <= 0) throw new Error('Hold amount must be positive');
 
-  const opts = session ? { session } : {};
-  const user = await User.findById(userId).session(session || null);
-  if (!user) throw new Error(`User ${userId} not found`);
-  if (user.balance < amount) {
-    throw new Error(
-      `Insufficient balance for hold. Available: ZMW ${user.balance.toFixed(2)}, Required: ZMW ${amount.toFixed(2)}`
-    );
-  }
-
   const ledgerEntry = await _createEntry(
     {
       userId,
@@ -152,11 +168,19 @@ const hold = async (userId, amount, category, meta = {}, session) => {
     session
   );
 
-  await User.findByIdAndUpdate(
-    userId,
+  const updatedUser = await _updateUser(
+    { _id: userId, balance: { $gte: amount } },
     { $inc: { balance: -amount, frozenBalance: amount } },
-    opts
+    session
   );
+
+  if (!updatedUser) {
+    await _reverseEntry(ledgerEntry._id, 'insufficient_balance', session);
+    throw new Error(
+      `Insufficient balance for hold. Required: ZMW ${amount.toFixed(2)}`
+    );
+  }
+
   await _syncSnapshot(userId, session);
   return ledgerEntry;
 };
@@ -174,8 +198,6 @@ const hold = async (userId, amount, category, meta = {}, session) => {
 const releaseHold = async (userId, amount, session) => {
   if (!amount || amount <= 0) throw new Error('Release amount must be positive');
 
-  const opts = session ? { session } : {};
-
   const ledgerEntry = await _createEntry(
     {
       userId,
@@ -188,11 +210,17 @@ const releaseHold = async (userId, amount, session) => {
     session
   );
 
-  await User.findByIdAndUpdate(
-    userId,
+  const updatedUser = await _updateUser(
+    { _id: userId, frozenBalance: { $gte: amount } },
     { $inc: { balance: amount, frozenBalance: -amount } },
-    opts
+    session
   );
+
+  if (!updatedUser) {
+    await _reverseEntry(ledgerEntry._id, 'insufficient_frozen_balance', session);
+    throw new Error('Insufficient frozen balance for release');
+  }
+
   await _syncSnapshot(userId, session);
   return ledgerEntry;
 };
@@ -208,9 +236,7 @@ const releaseHold = async (userId, amount, session) => {
  * @param {ClientSession} [session]
  */
 const confirmWithdrawal = async (userId, amount, meta = {}, session) => {
-  const opts = session ? { session } : {};
-
-  await _createEntry(
+  const ledgerEntry = await _createEntry(
     {
       userId,
       type: 'DEBIT',
@@ -222,7 +248,17 @@ const confirmWithdrawal = async (userId, amount, meta = {}, session) => {
     session
   );
 
-  await User.findByIdAndUpdate(userId, { $inc: { frozenBalance: -amount } }, opts);
+  const updatedUser = await _updateUser(
+    { _id: userId, frozenBalance: { $gte: amount } },
+    { $inc: { frozenBalance: -amount } },
+    session
+  );
+
+  if (!updatedUser) {
+    await _reverseEntry(ledgerEntry._id, 'insufficient_frozen_balance', session);
+    throw new Error('Insufficient frozen balance for withdrawal confirmation');
+  }
+
   await _syncSnapshot(userId, session);
 };
 
@@ -238,8 +274,6 @@ const confirmWithdrawal = async (userId, amount, meta = {}, session) => {
  * @returns {WalletLedger}
  */
 const creditPending = async (userId, amount, meta = {}, session) => {
-  const opts = session ? { session } : {};
-
   const ledgerEntry = await _createEntry(
     {
       userId,
@@ -252,7 +286,17 @@ const creditPending = async (userId, amount, meta = {}, session) => {
     session
   );
 
-  await User.findByIdAndUpdate(userId, { $inc: { pendingBalance: amount } }, opts);
+  const updatedUser = await _updateUser(
+    { _id: userId },
+    { $inc: { pendingBalance: amount } },
+    session
+  );
+
+  if (!updatedUser) {
+    await _reverseEntry(ledgerEntry._id, 'user_not_found', session);
+    throw new Error(`User ${userId} not found`);
+  }
+
   await _syncSnapshot(userId, session);
   return ledgerEntry;
 };
@@ -290,7 +334,7 @@ const approveDeposit = async (userId, depositAmount, netAmount, meta = {}, sessi
   }
 
   // Credit the net amount to available balance
-  await _createEntry(
+  const ledgerEntry = await _createEntry(
     {
       userId,
       type: 'CREDIT',
@@ -306,11 +350,17 @@ const approveDeposit = async (userId, depositAmount, netAmount, meta = {}, sessi
     session
   );
 
-  await User.findByIdAndUpdate(
-    userId,
+  const updatedUser = await _updateUser(
+    { _id: userId, pendingBalance: { $gte: depositAmount } },
     { $inc: { balance: netAmount, pendingBalance: -depositAmount, lifetimeEarnings: netAmount } },
-    opts
+    session
   );
+
+  if (!updatedUser) {
+    await _reverseEntry(ledgerEntry._id, 'insufficient_pending_balance', session);
+    throw new Error('Pending balance insufficient for deposit approval');
+  }
+
   await _syncSnapshot(userId, session);
 };
 
@@ -360,7 +410,16 @@ const rejectDeposit = async (userId, amount, meta = {}, session) => {
     );
   }
 
-  await User.findByIdAndUpdate(userId, { $inc: { pendingBalance: -amount } }, opts);
+  const updatedUser = await _updateUser(
+    { _id: userId, pendingBalance: { $gte: amount } },
+    { $inc: { pendingBalance: -amount } },
+    session
+  );
+
+  if (!updatedUser) {
+    throw new Error('Pending balance insufficient to reject deposit');
+  }
+
   await _syncSnapshot(userId, session);
 };
 
@@ -377,8 +436,6 @@ const rejectDeposit = async (userId, amount, meta = {}, session) => {
  * @returns {WalletLedger}
  */
 const creditMarketplaceSale = async (sellerId, netAmount, commission, meta = {}, session) => {
-  const opts = session ? { session } : {};
-
   const ledgerEntry = await _createEntry(
     {
       userId: sellerId,
@@ -391,8 +448,8 @@ const creditMarketplaceSale = async (sellerId, netAmount, commission, meta = {},
     session
   );
 
-  await User.findByIdAndUpdate(
-    sellerId,
+  const updatedUser = await _updateUser(
+    { _id: sellerId },
     {
       $inc: {
         balance: netAmount,
@@ -400,8 +457,14 @@ const creditMarketplaceSale = async (sellerId, netAmount, commission, meta = {},
         lifetimeEarnings: netAmount,
       },
     },
-    opts
+    session
   );
+
+  if (!updatedUser) {
+    await _reverseEntry(ledgerEntry._id, 'user_not_found', session);
+    throw new Error(`User ${sellerId} not found`);
+  }
+
   await _syncSnapshot(sellerId, session);
   return ledgerEntry;
 };
@@ -420,11 +483,10 @@ const creditMarketplaceSale = async (sellerId, netAmount, commission, meta = {},
  * @param {ClientSession} [session]
  */
 const adminAdjust = async (userId, adjustAmount, balanceType, reason, adminId, session) => {
-  const opts = session ? { session } : {};
   const abs = Math.abs(adjustAmount);
   const isCredit = adjustAmount > 0;
 
-  await _createEntry(
+  const ledgerEntry = await _createEntry(
     {
       userId,
       type: isCredit ? 'CREDIT' : 'DEBIT',
@@ -436,16 +498,25 @@ const adminAdjust = async (userId, adjustAmount, balanceType, reason, adminId, s
     session
   );
 
-  await User.findByIdAndUpdate(
-    userId,
+  const balanceFilter = isCredit
+    ? { _id: userId }
+    : { _id: userId, [balanceType]: { $gte: abs } };
+  const updatedUser = await _updateUser(
+    balanceFilter,
     {
       $inc: {
         [balanceType]: adjustAmount,
         ...(isCredit ? { lifetimeEarnings: adjustAmount } : {}),
       },
     },
-    opts
+    session
   );
+
+  if (!updatedUser) {
+    await _reverseEntry(ledgerEntry._id, 'insufficient_balance', session);
+    throw new Error('Balance adjustment would result in negative balance');
+  }
+
   await _syncSnapshot(userId, session);
 };
 

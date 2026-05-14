@@ -4,21 +4,70 @@ import api from '../api/axios';
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(undefined); // undefined = loading
   const [token, setToken] = useState(() => localStorage.getItem('ze_token'));
+  const [user, setUser] = useState(() => {
+    const stored = localStorage.getItem('ze_user');
+    return stored ? JSON.parse(stored) : undefined;
+  }); // undefined = loading
+
+  const persistUser = (data) => {
+    setUser(data);
+    if (data) {
+      localStorage.setItem('ze_user', JSON.stringify(data));
+    } else {
+      localStorage.removeItem('ze_user');
+    }
+  };
+
+  const clearAuth = () => {
+    localStorage.removeItem('ze_token');
+    localStorage.removeItem('ze_user');
+    setToken(null);
+    setUser(null);
+  };
+
+  const isTokenExpired = (jwtToken) => {
+    try {
+      const payload = JSON.parse(atob(jwtToken.split('.')[1]));
+      return payload.exp ? payload.exp * 1000 < Date.now() : false;
+    } catch (err) {
+      return true;
+    }
+  };
+
+  useEffect(() => {
+    const handleLogoutEvent = () => {
+      clearAuth();
+    };
+    window.addEventListener('auth:logout', handleLogoutEvent);
+    return () => window.removeEventListener('auth:logout', handleLogoutEvent);
+  }, []);
+
+  useEffect(() => {
+    const handleWalletRefresh = () => {
+      if (token) {
+        refreshUser().catch(() => null);
+      }
+    };
+    window.addEventListener('wallet:refresh', handleWalletRefresh);
+    return () => window.removeEventListener('wallet:refresh', handleWalletRefresh);
+  }, [token]);
 
   useEffect(() => {
     if (!token) {
       setUser(null);
       return;
     }
+    if (isTokenExpired(token)) {
+      clearAuth();
+      return;
+    }
     api.get('/api/auth/me')
-      .then((res) => setUser(res.data.user))
+      .then((res) => {
+        persistUser(res.data.user);
+      })
       .catch(() => {
-        setUser(null);
-        setToken(null);
-        localStorage.removeItem('ze_token');
-        localStorage.removeItem('ze_user');
+        clearAuth();
       });
   }, [token]);
 
@@ -26,9 +75,8 @@ export function AuthProvider({ children }) {
     const res = await api.post('/api/auth/login', credentials);
     const { token: t, user: u } = res.data;
     localStorage.setItem('ze_token', t);
-    localStorage.setItem('ze_user', JSON.stringify(u));
     setToken(t);
-    setUser(u);
+    persistUser(u);
     return u;
   };
 
@@ -36,22 +84,24 @@ export function AuthProvider({ children }) {
     const res = await api.post('/api/auth/register', data);
     const { token: t, user: u } = res.data;
     localStorage.setItem('ze_token', t);
-    localStorage.setItem('ze_user', JSON.stringify(u));
     setToken(t);
-    setUser(u);
+    persistUser(u);
     return u;
   };
 
-  const logout = () => {
-    localStorage.removeItem('ze_token');
-    localStorage.removeItem('ze_user');
-    setToken(null);
-    setUser(null);
+  const logout = async () => {
+    try {
+      await api.post('/api/auth/logout');
+    } catch (err) {
+      // ignore logout errors
+    } finally {
+      clearAuth();
+    }
   };
 
   const refreshUser = async () => {
     const res = await api.get('/api/auth/me');
-    setUser(res.data.user);
+    persistUser(res.data.user);
     return res.data.user;
   };
 

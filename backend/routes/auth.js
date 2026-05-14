@@ -140,7 +140,11 @@ router.post(
       if (email) query.push({ email: email.toLowerCase() });
       if (phone) query.push({ phone });
 
-      const user = await User.findOne({ $or: query }).select('+password');
+      let userQuery = User.findOne({ $or: query });
+      if (userQuery && typeof userQuery.select === 'function') {
+        userQuery = userQuery.select('+password');
+      }
+      const user = await userQuery;
       if (!user) {
         return res.status(401).json({ success: false, message: 'Invalid credentials' });
       }
@@ -171,6 +175,9 @@ router.post(
 router.get('/me', protect, async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
     res.json({ success: true, user });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error' });

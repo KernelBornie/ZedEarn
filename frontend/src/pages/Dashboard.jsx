@@ -8,7 +8,7 @@ export default function Dashboard() {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const loadDashboard = () =>
     Promise.all([
       api.get('/api/wallet'),
       api.get('/api/notifications?limit=5'),
@@ -16,9 +16,20 @@ export default function Dashboard() {
       .then(([wRes, nRes]) => {
         setWallet(wRes.data.wallet);
         setNotifications(nRes.data.notifications || []);
-      })
+      });
+
+  useEffect(() => {
+    loadDashboard()
       .catch(console.error)
       .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    const handleRefresh = () => {
+      loadDashboard().catch(console.error);
+    };
+    window.addEventListener('wallet:refresh', handleRefresh);
+    return () => window.removeEventListener('wallet:refresh', handleRefresh);
   }, []);
 
   const vipBadge = (tier) => <span className={`badge badge-${tier}`}>{tier === 'none' ? 'Free' : tier}</span>;

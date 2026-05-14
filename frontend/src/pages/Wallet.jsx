@@ -24,14 +24,27 @@ export default function Wallet() {
   const [submitting, setSubmitting] = useState({ recharge: false, withdraw: false });
   const [activeTab, setActiveTab] = useState('overview');
 
-  useEffect(() => {
+  const loadWallet = () =>
     Promise.all([api.get('/api/wallet'), api.get('/api/wallet/transactions?limit=20')])
       .then(([wRes, tRes]) => {
         setWallet(wRes.data.wallet);
         setTransactions(tRes.data.transactions);
-      })
+        return wRes.data.wallet;
+      });
+
+  useEffect(() => {
+    loadWallet()
       .catch(console.error)
       .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    const handleRefresh = (event) => {
+      if (event.detail?.source === 'wallet') return;
+      loadWallet().catch(console.error);
+    };
+    window.addEventListener('wallet:refresh', handleRefresh);
+    return () => window.removeEventListener('wallet:refresh', handleRefresh);
   }, []);
 
   const handleRecharge = async (e) => {
@@ -41,6 +54,8 @@ export default function Wallet() {
     try {
       const res = await api.post('/api/wallet/recharge', rechargeForm);
       setRechargeMsg({ type: 'success', text: res.data.instructions });
+      const updatedWallet = await loadWallet().catch(() => null);
+      window.dispatchEvent(new CustomEvent('wallet:refresh', { detail: { source: 'wallet', wallet: updatedWallet } }));
     } catch (err) {
       const errs = err.response?.data?.errors;
       setRechargeMsg({ type: 'error', text: errs ? errs.map((e) => e.msg).join(', ') : err.response?.data?.message || 'Failed' });
@@ -56,6 +71,8 @@ export default function Wallet() {
     try {
       const res = await api.post('/api/wallet/withdraw', withdrawForm);
       setWithdrawMsg({ type: 'success', text: `Withdrawal submitted! Ref: ${res.data.reference}. Net: ZMW ${res.data.netAmount?.toFixed(2)}` });
+      const updatedWallet = await loadWallet().catch(() => null);
+      window.dispatchEvent(new CustomEvent('wallet:refresh', { detail: { source: 'wallet', wallet: updatedWallet } }));
     } catch (err) {
       const errs = err.response?.data?.errors;
       setWithdrawMsg({ type: 'error', text: errs ? errs.map((e) => e.msg).join(', ') : err.response?.data?.message || 'Failed' });

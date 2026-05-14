@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import api from '../api/axios';
+import { useAuth } from '../context/AuthContext';
 
 const TYPE_LABELS = {
   ad_watch: '📺 Watch Ad',
@@ -10,6 +11,7 @@ const TYPE_LABELS = {
 };
 
 export default function Tasks() {
+  const { refreshUser } = useAuth();
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [completing, setCompleting] = useState({});
@@ -51,7 +53,34 @@ export default function Tasks() {
         ...prev,
         [taskId]: { type: 'success', text: res.data.message },
       }));
+      setTasks((prev) =>
+        prev.map((task) => {
+          if (task._id !== taskId) return task;
+          const status = task.userStatus || {};
+          const max = task.maxCompletionsPerUser ?? 1;
+          const nextCount = (status.completionCount || 0) + 1;
+          const remaining = max > 0 ? Math.max(0, max - nextCount) : null;
+          const cooldownActive = task.cooldownHours > 0;
+          const nextAvailableAt = cooldownActive
+            ? new Date(Date.now() + task.cooldownHours * 60 * 60 * 1000).toISOString()
+            : status.nextAvailableAt;
+          return {
+            ...task,
+            userStatus: {
+              ...status,
+              completionCount: nextCount,
+              remainingAvailability: remaining,
+              isCompleted: max > 0 ? nextCount >= max : false,
+              canComplete: false,
+              cooldownActive,
+              nextAvailableAt,
+            },
+          };
+        })
+      );
       if (res.data.wallet) setWallet(res.data.wallet);
+      window.dispatchEvent(new CustomEvent('wallet:refresh', { detail: { source: 'tasks', wallet: res.data.wallet } }));
+      await refreshUser().catch(() => null);
       fetchTasks(filter);
     } catch (err) {
       setMessages((prev) => ({

@@ -38,6 +38,7 @@ const notificationRoutes = require('./routes/notifications');
 const supportRoutes = require('./routes/support');
 
 const app = express();
+app.set('etag', false);
 const server = http.createServer(app);
 
 // ─── Socket.IO Setup ──────────────────────────────────────────────────────────
@@ -119,6 +120,13 @@ app.use('/api/wallet/withdraw', walletLimiter);
 app.use('/api/wallet/recharge', walletLimiter);
 
 // ─── General Middleware ───────────────────────────────────────────────────────
+app.use((req, res, next) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  res.set('Surrogate-Control', 'no-store');
+  next();
+});
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(mongoSanitize());

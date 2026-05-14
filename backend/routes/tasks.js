@@ -8,10 +8,18 @@ const Notification = require('../models/Notification');
 const User = require('../models/User');
 const { protect, authorize } = require('../middleware/auth');
 const ledgerService = require('../services/ledgerService');
+const { safeTransaction } = require('../utils/dbTransaction');
 
 const router = express.Router();
 
 const TASK_TYPES = ['ad_watch', 'survey', 'daily_checkin', 'referral', 'mission'];
+const TASK_LIMIT_WINDOWS = {
+  daily_checkin: 24,
+  survey: 24,
+  ad_watch: 24,
+  mission: 168,
+};
+const SPAM_WINDOW_MS = 30 * 1000;
 
 const createError = (statusCode, message, extra = {}) => {
   const error = new Error(message);
@@ -25,6 +33,11 @@ const isVipActive = (user) => {
   if (!user.vipTier || user.vipTier === 'none') return false;
   if (!user.vipExpiry) return true;
   return user.vipExpiry > new Date();
+};
+
+const getLimitWindowHours = (task) => {
+  if (!task || !task.maxCompletionsPerUser || task.maxCompletionsPerUser <= 0) return null;
+  return TASK_LIMIT_WINDOWS[task.type] || (task.cooldownHours > 0 ? task.cooldownHours : null);
 };
 
 // GET /api/tasks - list active tasks with user status
@@ -43,7 +56,7 @@ router.get('/', protect, async (req, res) => {
       {
         $group: {
           _id: '$taskId',
-          count: { $sum: 1 },
+          totalCount: { $sum: 1 },
           lastCompletedAt: { $max: '$completedAt' },
         },
       },
@@ -52,18 +65,48 @@ router.get('/', protect, async (req, res) => {
     const statsByTaskId = new Map(
       completionStats.map((stat) => [
         String(stat._id),
-        { count: stat.count, lastCompletedAt: stat.lastCompletedAt },
+        { totalCount: stat.totalCount, lastCompletedAt: stat.lastCompletedAt },
       ])
     );
 
     const now = new Date();
+    const windowGroups = new Map();
+
+    tasks.forEach((task) => {
+      const windowHours = getLimitWindowHours(task);
+      if (!windowHours) return;
+      const key = String(windowHours);
+      if (!windowGroups.has(key)) {
+        windowGroups.set(key, { windowHours, taskIds: [] });
+      }
+      windowGroups.get(key).taskIds.push(task._id);
+    });
+
+    const windowCountsByTaskId = new Map();
+    await Promise.all(
+      [...windowGroups.values()].map(async ({ windowHours, taskIds }) => {
+        if (!taskIds.length) return;
+        const windowStart = new Date(now.getTime() - windowHours * 60 * 60 * 1000);
+        const counts = await TaskCompletion.aggregate([
+          { $match: { userId: req.user._id, taskId: { $in: taskIds }, completedAt: { $gte: windowStart } } },
+          { $group: { _id: '$taskId', count: { $sum: 1 } } },
+        ]);
+        counts.forEach((stat) => windowCountsByTaskId.set(String(stat._id), stat.count));
+      })
+    );
+
     const vipActive = isVipActive(req.user);
 
     const tasksWithStatus = tasks.map((task) => {
-      const stats = statsByTaskId.get(String(task._id)) || { count: 0, lastCompletedAt: null };
+      const stats = statsByTaskId.get(String(task._id)) || { totalCount: 0, lastCompletedAt: null };
+      const windowHours = getLimitWindowHours(task);
+      let count = stats.totalCount;
+      if (windowHours) {
+        count = windowCountsByTaskId.get(String(task._id)) || 0;
+      }
       const maxCompletions = task.maxCompletionsPerUser ?? 1;
       const remainingAvailability =
-        maxCompletions > 0 ? Math.max(0, maxCompletions - stats.count) : null;
+        maxCompletions > 0 ? Math.max(0, maxCompletions - count) : null;
 
       let nextAvailableAt = null;
       if (task.cooldownHours > 0 && stats.lastCompletedAt) {
@@ -73,7 +116,7 @@ router.get('/', protect, async (req, res) => {
         }
       }
 
-      const isCompleted = maxCompletions > 0 && stats.count >= maxCompletions;
+      const isCompleted = maxCompletions > 0 && count >= maxCompletions;
       const vipBlocked = task.vipOnly && !vipActive;
       const cooldownActive = Boolean(nextAvailableAt);
       const canComplete = !vipBlocked && !isCompleted && !cooldownActive;
@@ -81,7 +124,7 @@ router.get('/', protect, async (req, res) => {
       return {
         ...task.toObject(),
         userStatus: {
-          completionCount: stats.count,
+          completionCount: count,
           remainingAvailability,
           lastCompletedAt: stats.lastCompletedAt,
           nextAvailableAt,
@@ -204,15 +247,14 @@ const completeTaskHandler = async (req, res, taskId) => {
   }
 
   const taskObjectId = new mongoose.Types.ObjectId(taskId);
-  const session = await mongoose.startSession();
-  try {
-    let task;
-    let completion;
-    let transaction;
-    let wallet;
+  const now = new Date();
 
-    await session.withTransaction(async () => {
-      task = await Task.findById(taskObjectId).session(session);
+  try {
+    const result = await safeTransaction(async (session) => {
+      const sessionOpts = session ? { session } : {};
+      const taskQuery = Task.findById(taskObjectId);
+      if (session) taskQuery.session(session);
+      const task = await taskQuery;
       if (!task) throw createError(404, 'Task not found');
       if (!task.isActive) throw createError(400, 'Task is not active');
 
@@ -221,79 +263,171 @@ const completeTaskHandler = async (req, res, taskId) => {
         throw createError(403, 'This task is available to VIP members only');
       }
 
-      const completionCount = await TaskCompletion.countDocuments({
-        userId: req.user._id,
-        taskId: task._id,
-      }).session(session);
+      const maxCompletions = task.maxCompletionsPerUser ?? 1;
+      const limitWindowHours = getLimitWindowHours(task);
+      const windowStart = limitWindowHours
+        ? new Date(now.getTime() - limitWindowHours * 60 * 60 * 1000)
+        : null;
 
-      if (task.maxCompletionsPerUser > 0 && completionCount >= task.maxCompletionsPerUser) {
-        throw createError(429, 'Task completion limit reached');
+      let completionCount = 0;
+      if (maxCompletions > 0) {
+        const countQuery = TaskCompletion.countDocuments({
+          userId: req.user._id,
+          taskId: task._id,
+          ...(windowStart ? { completedAt: { $gte: windowStart } } : {}),
+        });
+        if (session) countQuery.session(session);
+        completionCount = await countQuery;
+
+        if (completionCount >= maxCompletions) {
+          const message = maxCompletions === 1 ? 'Task already completed' : 'Task completion limit reached';
+          const statusCode = maxCompletions === 1 ? 409 : 429;
+          throw createError(statusCode, message);
+        }
       }
 
       if (task.cooldownHours > 0) {
-        const recentCompletion = await TaskCompletion.findOne({
+        const recentQuery = TaskCompletion.findOne({
           userId: req.user._id,
           taskId: task._id,
-        })
-          .sort({ completedAt: -1 })
-          .session(session);
+        }).sort({ completedAt: -1 });
+        if (session) recentQuery.session(session);
+        const recentCompletion = await recentQuery;
 
         if (recentCompletion) {
           const nextAvailableAt = new Date(
             recentCompletion.completedAt.getTime() + task.cooldownHours * 60 * 60 * 1000
           );
-          if (nextAvailableAt > new Date()) {
-            throw createError(429, `Cooldown active. Next available at ${nextAvailableAt.toISOString()}`, {
+          if (nextAvailableAt > now) {
+            const remainingMs = nextAvailableAt.getTime() - now.getTime();
+            throw createError(429, `Cooldown active. Try again in ${Math.ceil(remainingMs / 60000)} minutes`, {
               nextAvailableAt,
+              remainingMs,
             });
           }
         }
       }
 
-      const rewardAmount = task.reward;
+      const rewardAmount = Number(task.reward || 0);
+      if (!Number.isFinite(rewardAmount) || rewardAmount <= 0) {
+        throw createError(400, 'Invalid task reward');
+      }
 
-      [completion] = await TaskCompletion.create(
-        [
+      const windowKey = windowStart ? windowStart.toISOString() : 'lifetime';
+      const completionIndex = maxCompletions > 0 ? completionCount + 1 : null;
+      const spamBucket = Math.floor(now.getTime() / SPAM_WINDOW_MS);
+      const idempotencyKey = maxCompletions > 0
+        ? `task:${task._id}:user:${req.user._id}:window:${windowKey}:index:${completionIndex}`
+        : `task:${task._id}:user:${req.user._id}:bucket:${spamBucket}`;
+
+      const existingQuery = TaskCompletion.findOne({ idempotencyKey });
+      if (session) existingQuery.session(session);
+      const existingCompletion = await existingQuery;
+      if (existingCompletion) {
+        throw createError(409, 'Task already completed');
+      }
+
+      let transaction;
+      try {
+        [transaction] = await Transaction.create(
+          [
+            {
+              userId: req.user._id,
+              type: 'task_reward',
+              amount: rewardAmount,
+              fee: 0,
+              status: 'completed',
+              idempotencyKey,
+              description: `Reward for completing task: ${task.title}`,
+              meta: {
+                taskId: task._id,
+                completionIndex,
+                windowStart,
+              },
+              processedAt: new Date(),
+            },
+          ],
+          sessionOpts
+        );
+      } catch (err) {
+        if (err.code === 11000 && (err.keyPattern?.idempotencyKey || String(err.message).includes('idempotencyKey'))) {
+          throw createError(409, 'Task already completed');
+        }
+        throw err;
+      }
+
+      let completion;
+      try {
+        [completion] = await TaskCompletion.create(
+          [
+            {
+              userId: req.user._id,
+              taskId: task._id,
+              reward: rewardAmount,
+              status: 'approved',
+              completedAt: now,
+              idempotencyKey,
+            },
+          ],
+          sessionOpts
+        );
+      } catch (err) {
+        await Transaction.findByIdAndUpdate(
+          transaction._id,
+          { status: 'failed', meta: { ...transaction.meta, failureReason: err.message } },
+          sessionOpts
+        );
+        if (err.code === 11000 && (err.keyPattern?.idempotencyKey || String(err.message).includes('idempotencyKey'))) {
+          throw createError(409, 'Task already completed');
+        }
+        throw err;
+      }
+
+      await Transaction.findByIdAndUpdate(
+        transaction._id,
+        { $set: { 'meta.completionId': completion._id } },
+        sessionOpts
+      );
+
+      try {
+        await ledgerService.credit(
+          req.user._id,
+          rewardAmount,
+          'TASK',
           {
-            userId: req.user._id,
             taskId: task._id,
-            reward: rewardAmount,
-            status: 'approved',
+            completionId: completion._id,
+            transactionRef: transaction.reference,
           },
-        ],
-        { session }
-      );
-
-      [transaction] = await Transaction.create(
-        [
-          {
-            userId: req.user._id,
-            type: 'task_reward',
-            amount: rewardAmount,
-            fee: 0,
-            status: 'completed',
-            description: `Reward for completing task: ${task.title}`,
-            meta: { taskId: task._id, completionId: completion._id },
-            processedAt: new Date(),
-          },
-        ],
-        { session }
-      );
-
-      await ledgerService.credit(req.user._id, rewardAmount, 'TASK', {
-        taskId: task._id,
-        completionId: completion._id,
-        transactionRef: transaction.reference,
-      }, session);
+          session
+        );
+      } catch (err) {
+        await Transaction.findByIdAndUpdate(
+          transaction._id,
+          { status: 'failed', meta: { ...transaction.meta, failureReason: err.message } },
+          sessionOpts
+        );
+        await TaskCompletion.findByIdAndUpdate(
+          completion._id,
+          { status: 'rejected' },
+          sessionOpts
+        );
+        throw err;
+      }
 
       await User.findByIdAndUpdate(
         req.user._id,
         { $inc: { xpPoints: Math.ceil(rewardAmount) } },
-        { session }
+        sessionOpts
       );
 
-      const updatedUser = await User.findById(req.user._id).session(session);
-      wallet = {
+      const updatedUserQuery = User.findById(req.user._id);
+      if (session) updatedUserQuery.session(session);
+      const updatedUser = await updatedUserQuery;
+      if (!updatedUser) {
+        throw createError(404, 'User not found');
+      }
+      const wallet = {
         balance: updatedUser.balance,
         rewardBalance: updatedUser.rewardBalance,
         commissionBalance: updatedUser.commissionBalance,
@@ -302,38 +436,44 @@ const completeTaskHandler = async (req, res, taskId) => {
         lifetimeEarnings: updatedUser.lifetimeEarnings,
       };
 
-      await Notification.create(
-        [
-          {
-            userId: req.user._id,
-            title: 'Task Reward Earned!',
-            message: `You earned ZMW ${rewardAmount.toFixed(2)} for completing "${task.title}"`,
-            type: 'reward',
-            link: '/wallet',
-          },
-        ],
-        { session }
-      );
+      try {
+        await Notification.create(
+          [
+            {
+              userId: req.user._id,
+              title: 'Task Reward Earned!',
+              message: `You earned ZMW ${rewardAmount.toFixed(2)} for completing "${task.title}"`,
+              type: 'reward',
+              link: '/wallet',
+            },
+          ],
+          sessionOpts
+        );
+      } catch (err) {
+        console.error('Task completion notification failed', err.message);
+      }
+
+      return { task, transaction, completion, wallet, rewardAmount };
     });
 
     const io = req.app.get('io');
     if (io) {
       io.to(`user:${req.user._id}`).emit('taskCompleted', {
-        task: { _id: task._id, title: task.title },
-        reward: task.reward,
+        task: { _id: result.task._id, title: result.task.title },
+        reward: result.rewardAmount,
       });
       io.to(`user:${req.user._id}`).emit('balanceUpdate', {
-        balance: wallet.balance,
-        rewardBalance: wallet.rewardBalance,
+        balance: result.wallet.balance,
+        rewardBalance: result.wallet.rewardBalance,
       });
     }
 
     res.json({
       success: true,
-      message: `Task completed! You earned ZMW ${task.reward.toFixed(2)}`,
-      reward: task.reward,
-      transaction: transaction.reference,
-      wallet,
+      message: `Task completed! You earned ZMW ${result.rewardAmount.toFixed(2)}`,
+      reward: result.rewardAmount,
+      transaction: result.transaction.reference,
+      wallet: result.wallet,
     });
   } catch (err) {
     const status = err.statusCode || 500;
@@ -341,9 +481,8 @@ const completeTaskHandler = async (req, res, taskId) => {
       success: false,
       message: err.message || 'Server error',
       ...(err.nextAvailableAt && { nextAvailableAt: err.nextAvailableAt }),
+      ...(err.remainingMs !== undefined && { cooldownRemainingMs: err.remainingMs }),
     });
-  } finally {
-    session.endSession();
   }
 };
 
