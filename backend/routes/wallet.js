@@ -23,9 +23,6 @@ router.get('/', protect, async (req, res) => {
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found' });
-    }
     const recentTransactions = await Transaction.find({ userId: req.user._id })
       .sort({ createdAt: -1 })
       .limit(10);
