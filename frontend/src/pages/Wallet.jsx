@@ -25,7 +25,7 @@ export default function Wallet() {
   const [activeTab, setActiveTab] = useState('overview');
 
   const loadWallet = () =>
-    Promise.all([api.get('/api/wallet'), api.get('/api/wallet/transactions?limit=20')])
+    Promise.all([api.get('/wallet'), api.get('/wallet/transactions?limit=20')])
       .then(([wRes, tRes]) => {
         setWallet(wRes.data.wallet);
         setTransactions(tRes.data.transactions);
@@ -52,7 +52,7 @@ export default function Wallet() {
     setRechargeMsg(null);
     setSubmitting((p) => ({ ...p, recharge: true }));
     try {
-      const res = await api.post('/api/wallet/recharge', rechargeForm);
+      const res = await api.post('/wallet/recharge', rechargeForm);
       setRechargeMsg({ type: 'success', text: res.data.instructions });
       const updatedWallet = await loadWallet().catch(() => null);
       window.dispatchEvent(new CustomEvent('wallet:refresh', { detail: { source: 'wallet', wallet: updatedWallet } }));
@@ -69,7 +69,7 @@ export default function Wallet() {
     setWithdrawMsg(null);
     setSubmitting((p) => ({ ...p, withdraw: true }));
     try {
-      const res = await api.post('/api/wallet/withdraw', withdrawForm);
+      const res = await api.post('/wallet/withdraw', withdrawForm);
       setWithdrawMsg({ type: 'success', text: `Withdrawal submitted! Ref: ${res.data.reference}. Net: ZMW ${res.data.netAmount?.toFixed(2)}` });
       const updatedWallet = await loadWallet().catch(() => null);
       window.dispatchEvent(new CustomEvent('wallet:refresh', { detail: { source: 'wallet', wallet: updatedWallet } }));

@@ -23,7 +23,7 @@ export default function Tasks() {
     setLoading(true);
     const params = {};
     if (type) params.type = type;
-    api.get('/api/tasks', { params })
+    api.get('/tasks', { params })
       .then((res) => {
         setTasks(res.data.tasks);
       })
@@ -32,7 +32,7 @@ export default function Tasks() {
   };
 
   const fetchWallet = () => {
-    api.get('/api/wallet')
+    api.get('/wallet')
       .then((res) => setWallet(res.data.wallet))
       .catch(console.error);
   };
@@ -48,7 +48,7 @@ export default function Tasks() {
   const completeTask = async (taskId) => {
     setCompleting((prev) => ({ ...prev, [taskId]: true }));
     try {
-      const res = await api.post(`/api/tasks/complete/${taskId}`);
+      const res = await api.post(`/tasks/complete/${taskId}`);
       setMessages((prev) => ({
         ...prev,
         [taskId]: { type: 'success', text: res.data.message },

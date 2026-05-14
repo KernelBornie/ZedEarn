@@ -6,7 +6,7 @@ const VIPPlan = require('./models/VIPPlan');
 const Task = require('./models/Task');
 // Intentionally only import models needed for idempotent seeding
 
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/zedearn';
+const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/zedearn';
 
 async function seed() {
   try {
@@ -30,44 +30,59 @@ async function seed() {
     console.log(`VIP Plans seeded: ${vipPlans.length}`);
 
     // USERS — keep password hashing hooks intact
-    const adminSeed = {
-      name: 'Admin',
-      email: 'admin@zedearn.zm',
-      password: 'Admin1234!',
-      role: 'admin',
-      balance: 10000,
+    const vipExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    const userSeeds = [
+      {
+        name: 'Admin',
+        email: 'admin@zedearn.zm',
+        password: 'Admin1234!',
+        role: 'admin',
+        balance: 10000,
+      },
+      {
+        name: 'Super Admin',
+        email: 'superadmin@zedearn.zm',
+        password: 'Super1234!',
+        role: 'superadmin',
+        balance: 50000,
+      },
+      {
+        name: 'Chanda User',
+        email: 'chanda@gmail.com',
+        password: 'Password123!',
+        role: 'user',
+      },
+      {
+        name: 'Mwamba VIP',
+        email: 'mwamba@yahoo.com',
+        password: 'Password123!',
+        role: 'vip',
+        vipTier: 'gold',
+        vipExpiry,
+      },
+      {
+        name: 'Thandiwe Merchant',
+        email: 'thandiwe@zedearn.zm',
+        password: 'Password123!',
+        role: 'merchant',
+      },
+    ];
+
+    const upsertUser = async (seed) => {
+      const existing = await User.findOne({ email: seed.email });
+      if (!existing) {
+        await User.create(seed);
+        return;
+      }
+      Object.entries(seed).forEach(([key, value]) => {
+        existing[key] = value;
+      });
+      await existing.save();
     };
-    const superAdminSeed = {
-      name: 'Super Admin',
-      email: 'superadmin@zedearn.zm',
-      password: 'Super1234!',
-      role: 'superadmin',
-      balance: 50000,
-    };
 
-    const adminUser = await User.findOne({ email: adminSeed.email });
-    if (!adminUser) {
-      await User.create(adminSeed);
-    } else {
-      adminUser.name = adminSeed.name;
-      adminUser.role = adminSeed.role;
-      adminUser.balance = adminSeed.balance;
-      adminUser.password = adminSeed.password;
-      await adminUser.save();
-    }
+    await Promise.all(userSeeds.map((seed) => upsertUser(seed)));
 
-    const superAdminUser = await User.findOne({ email: superAdminSeed.email });
-    if (!superAdminUser) {
-      await User.create(superAdminSeed);
-    } else {
-      superAdminUser.name = superAdminSeed.name;
-      superAdminUser.role = superAdminSeed.role;
-      superAdminUser.balance = superAdminSeed.balance;
-      superAdminUser.password = superAdminSeed.password;
-      await superAdminUser.save();
-    }
-
-    console.log('Users seeded: 2');
+    console.log(`Users seeded: ${userSeeds.length}`);
 
     const taskSeeds = [
       {

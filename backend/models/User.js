@@ -32,6 +32,27 @@ const UserSchema = new mongoose.Schema(
       minlength: 6,
       select: false,
     },
+    passwordResetOTP: {
+      type: String,
+      select: false,
+      default: null,
+    },
+    passwordResetOTPExpiry: {
+      type: Date,
+      default: null,
+    },
+    passwordChangedAt: {
+      type: Date,
+      default: null,
+    },
+    resetOTPAttempts: {
+      type: Number,
+      default: 0,
+    },
+    lastOTPRequest: {
+      type: Date,
+      default: null,
+    },
 
     role: {
       type: String,
@@ -113,8 +134,9 @@ UserSchema.virtual('fullReferralLink').get(function () {
 UserSchema.pre('save', async function (next) {
   if (!this.isModified('password')) return next();
 
-  const salt = await bcrypt.genSalt(12);
+  const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
+  this.passwordChangedAt = new Date();
   next();
 });
 

@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 export default function Register() {
   const { register } = useAuth();
   const navigate = useNavigate();
+  const passwordPolicy = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/;
   const [form, setForm] = useState({
     name: '',
     email: '',
@@ -23,6 +24,10 @@ export default function Register() {
     setError('');
     if (form.password !== form.confirmPassword) {
       setError('Passwords do not match.');
+      return;
+    }
+    if (!passwordPolicy.test(form.password)) {
+      setError('Password must be at least 8 characters and include uppercase, lowercase, number, and symbol.');
       return;
     }
     if (!form.email && !form.phone) {
@@ -98,7 +103,7 @@ export default function Register() {
             <input
               type="password"
               name="password"
-              placeholder="Min 6 characters"
+              placeholder="Min 8 characters"
               value={form.password}
               onChange={handleChange}
               required

@@ -10,8 +10,8 @@ export default function Dashboard() {
 
   const loadDashboard = () =>
     Promise.all([
-      api.get('/api/wallet'),
-      api.get('/api/notifications?limit=5'),
+      api.get('/wallet'),
+      api.get('/notifications?limit=5'),
     ])
       .then(([wRes, nRes]) => {
         setWallet(wRes.data.wallet);

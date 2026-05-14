@@ -11,10 +11,10 @@ if (fs.existsSync(envPath)) {
 
 const applyEnvDefaults = () => {
   if (!process.env.MONGO_URI && process.env.NODE_ENV !== 'production') {
-    process.env.MONGO_URI = 'mongodb://localhost:27017/zedearn';
+    process.env.MONGO_URI = 'mongodb://127.0.0.1:27017/zedearn';
   }
   if (!process.env.JWT_SECRET && process.env.NODE_ENV !== 'production') {
-    process.env.JWT_SECRET = 'dev_jwt_secret_zedearn';
+    process.env.JWT_SECRET = 'zedearn_secure_dev_secret';
   }
   if (!process.env.CLIENT_URL && process.env.NODE_ENV !== 'production') {
     process.env.CLIENT_URL = 'http://localhost:5173';
