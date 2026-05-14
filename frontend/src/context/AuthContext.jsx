@@ -44,7 +44,7 @@ export function AuthProvider({ children }) {
   }, [clearAuth]);
 
   const refreshUser = useCallback(async () => {
-    const res = await api.get('/api/auth/me');
+    const res = await api.get('/auth/me');
     persistUser(res.data.user);
     return res.data.user;
   }, [persistUser]);
@@ -68,7 +68,7 @@ export function AuthProvider({ children }) {
       clearAuth();
       return;
     }
-    api.get('/api/auth/me')
+    api.get('/auth/me')
       .then((res) => {
         persistUser(res.data.user);
       })
@@ -78,7 +78,7 @@ export function AuthProvider({ children }) {
   }, [token, clearAuth, persistUser]);
 
   const login = async (credentials) => {
-    const res = await api.post('/api/auth/login', credentials);
+    const res = await api.post('/auth/login', credentials);
     const { token: t, user: u } = res.data;
     localStorage.setItem('ze_token', t);
     setToken(t);
@@ -87,7 +87,7 @@ export function AuthProvider({ children }) {
   };
 
   const register = async (data) => {
-    const res = await api.post('/api/auth/register', data);
+    const res = await api.post('/auth/register', data);
     const { token: t, user: u } = res.data;
     localStorage.setItem('ze_token', t);
     setToken(t);
@@ -97,7 +97,7 @@ export function AuthProvider({ children }) {
 
   const logout = async () => {
     try {
-      await api.post('/api/auth/logout');
+      await api.post('/auth/logout');
     } catch (err) {
       // ignore logout errors
     } finally {

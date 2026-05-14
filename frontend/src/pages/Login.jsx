@@ -100,6 +100,10 @@ export default function Login() {
           </button>
         </form>
 
+        <p className="auth-link" style={{ marginTop: 12 }}>
+          <Link to="/forgot-password">Forgot Password?</Link>
+        </p>
+
         <p className="auth-link">
           Don&apos;t have an account? <Link to="/register">Register</Link>
         </p>

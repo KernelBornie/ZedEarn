@@ -4,6 +4,9 @@ import Sidebar from './components/Sidebar';
 import Topbar from './components/Topbar';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import ForgotPassword from './pages/ForgotPassword';
+import VerifyOTP from './pages/VerifyOTP';
+import ResetPassword from './pages/ResetPassword';
 import Dashboard from './pages/Dashboard';
 import Tasks from './pages/Tasks';
 import Wallet from './pages/Wallet';
@@ -39,6 +42,9 @@ function AppRoutes() {
     <Routes>
       <Route path="/login"    element={user ? <Navigate to="/dashboard" replace /> : <Login />} />
       <Route path="/register" element={user ? <Navigate to="/dashboard" replace /> : <Register />} />
+      <Route path="/forgot-password" element={user ? <Navigate to="/dashboard" replace /> : <ForgotPassword />} />
+      <Route path="/verify-otp" element={user ? <Navigate to="/dashboard" replace /> : <VerifyOTP />} />
+      <Route path="/reset-password" element={user ? <Navigate to="/dashboard" replace /> : <ResetPassword />} />
 
       <Route path="/dashboard" element={<ProtectedRoute><AppLayout><Dashboard /></AppLayout></ProtectedRoute>} />
       <Route path="/tasks"     element={<ProtectedRoute><AppLayout><Tasks /></AppLayout></ProtectedRoute>} />

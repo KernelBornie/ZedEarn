@@ -21,6 +21,12 @@ exports.protect = async (req, res, next) => {
       }
       return res.status(401).json({ success: false, message: 'User not found' });
     }
+    if (req.user.passwordChangedAt && decoded.iat) {
+      const changedAt = new Date(req.user.passwordChangedAt).getTime();
+      if (changedAt > decoded.iat * 1000) {
+        return res.status(401).json({ success: false, message: 'Token expired. Please log in again.' });
+      }
+    }
     if (req.user.isFrozen) {
       return res.status(403).json({ success: false, message: 'Account frozen. Contact support.' });
     }

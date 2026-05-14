@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 const logger = require('../utils/logger');
 
-const DEFAULT_URI = 'mongodb://localhost:27017/zedearn';
+const DEFAULT_URI = 'mongodb://127.0.0.1:27017/zedearn';
 const MAX_DELAY_MS = 30000;
 
 const getMongoUri = () => {
@@ -12,6 +12,23 @@ const getMongoUri = () => {
   }
   logger.error('[DB] MONGO_URI not set. Waiting for environment configuration.');
   return null;
+};
+
+let listenersAttached = false;
+
+const attachConnectionListeners = () => {
+  if (listenersAttached) return;
+  listenersAttached = true;
+
+  mongoose.connection.on('disconnected', () => {
+    logger.warn('[DB] MongoDB disconnected. Waiting for reconnection...');
+  });
+  mongoose.connection.on('reconnected', () => {
+    logger.info('[DB] MongoDB reconnected');
+  });
+  mongoose.connection.on('error', (err) => {
+    logger.error('[DB] MongoDB connection error', { error: err.message });
+  });
 };
 
 const connectDB = async () => {
@@ -31,6 +48,7 @@ const connectDB = async () => {
       logger.info(`[DB] Connecting to MongoDB (attempt ${attempt})...`);
       const conn = await mongoose.connect(uri, { serverSelectionTimeoutMS: 5000 });
       logger.info(`[DB] MongoDB Connected: ${conn.connection.host}`);
+      attachConnectionListeners();
       return conn;
     } catch (err) {
       const safeUri = uri.replace(/:\/\/[^@]+@/, '://***@');
