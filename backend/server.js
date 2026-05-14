@@ -2,40 +2,66 @@ const path = require('path');
 const fs = require('fs');
 
 const envPath = path.resolve(__dirname, '.env');
-
-if (!fs.existsSync(envPath)) {
-  console.warn('Missing backend/.env file — create it before running backend');
-  process.exit(1);
+if (fs.existsSync(envPath)) {
+  require('dotenv').config({ path: envPath });
+} else {
+  console.warn('Missing backend/.env file — falling back to system environment variables');
+  require('dotenv').config();
 }
 
-require('dotenv').config({
-  path: envPath,
-});
+const applyEnvDefaults = () => {
+  if (!process.env.MONGO_URI && process.env.NODE_ENV !== 'production') {
+    process.env.MONGO_URI = 'mongodb://localhost:27017/zedearn';
+  }
+  if (!process.env.JWT_SECRET && process.env.NODE_ENV !== 'production') {
+    process.env.JWT_SECRET = 'dev_jwt_secret_zedearn';
+  }
+  if (!process.env.CLIENT_URL && process.env.NODE_ENV !== 'production') {
+    process.env.CLIENT_URL = 'http://localhost:5173';
+  }
+  if (!process.env.PORT) {
+    process.env.PORT = '5001';
+  }
+};
 
-console.log("🔧 ZedEarn ENV CHECK");
-console.log("MONGO_URI:", process.env.MONGO_URI);
-console.log("REDIS_URL:", process.env.REDIS_URL);
-console.log("PORT:", process.env.PORT);
+applyEnvDefaults();
+
+const safeLog = (label, value) => {
+  if (!value) return console.log(`${label}: <missing>`);
+  if (label === 'MONGO_URI') {
+    return console.log(`${label}: ${value.replace(/:\/\/[^@]+@/, '://***@')}`);
+  }
+  return console.log(`${label}: ${value}`);
+};
+
+console.log('🔧 ZedEarn ENV CHECK');
+safeLog('MONGO_URI', process.env.MONGO_URI);
+safeLog('REDIS_URL', process.env.REDIS_URL);
+safeLog('PORT', process.env.PORT);
 
 const validateEnv = () => {
+  let valid = true;
   if (!process.env.MONGO_URI) {
-    console.error('❌ Missing MONGO_URI in backend/.env');
-    return false;
+    console.error('❌ Missing MONGO_URI. The server will keep retrying until it is set.');
+    valid = false;
   }
-
-  if (/<[^>]+>/.test(process.env.MONGO_URI)) {
+  if (process.env.MONGO_URI && /<[^>]+>/.test(process.env.MONGO_URI)) {
     console.error(
       '❌ MONGO_URI contains placeholder values (e.g., <user>, <password>, <cluster-id>). Update backend/.env with real credentials.'
     );
-    return false;
+    valid = false;
   }
-
-  return true;
+  if (!process.env.JWT_SECRET) {
+    console.error('❌ Missing JWT_SECRET. Authentication tokens may fail until it is set.');
+    valid = false;
+  }
+  if (!process.env.CLIENT_URL) {
+    console.warn('⚠️  Missing CLIENT_URL. Falling back to http://localhost:5173.');
+  }
+  return valid;
 };
 
-if (!validateEnv()) {
-  process.exit(1);
-}
+validateEnv();
 
 const cron = require('node-cron');
 
@@ -137,6 +163,11 @@ startServer();
 // Graceful shutdown
 process.on('unhandledRejection', (err) => {
   logger.error('Unhandled Promise Rejection', { error: err.message });
+  server.close(() => process.exit(1));
+});
+
+process.on('uncaughtException', (err) => {
+  logger.error('Uncaught Exception', { error: err.message });
   server.close(() => process.exit(1));
 });
 

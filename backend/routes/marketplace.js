@@ -1,6 +1,5 @@
 const express = require('express');
 const router = express.Router();
-const mongoose = require('mongoose');
 const { body, validationResult } = require('express-validator');
 const MarketplaceItem = require('../models/MarketplaceItem');
 const User = require('../models/User');
@@ -9,6 +8,7 @@ const Notification = require('../models/Notification');
 const { protect, authorize } = require('../middleware/auth');
 const { escapeRegex, safeEnum } = require('../utils/sanitize');
 const ledgerService = require('../services/ledgerService');
+const { safeTransaction } = require('../utils/dbTransaction');
 
 const ITEM_CATEGORIES = ['airtime', 'data', 'voucher', 'service', 'product'];
 
@@ -174,26 +174,29 @@ router.post('/:id/purchase', protect, async (req, res) => {
     const sellerReceives = parseFloat((item.price - commission).toFixed(2));
 
     // Atomically debit buyer and credit seller via ledger
-    const session = await mongoose.startSession();
-    session.startTransaction();
-    try {
-      await ledgerService.debit(req.user._id, item.price, 'MARKETPLACE', {
-        itemId: item._id,
-        sellerId: item.sellerId,
-      }, session);
+    await safeTransaction(async (session) => {
+      await ledgerService.debit(
+        req.user._id,
+        item.price,
+        'MARKETPLACE',
+        {
+          itemId: item._id,
+          sellerId: item.sellerId,
+        },
+        session
+      );
 
-      await ledgerService.creditMarketplaceSale(item.sellerId, sellerReceives, commission, {
-        itemId: item._id,
-        buyerId: req.user._id,
-      }, session);
-
-      await session.commitTransaction();
-    } catch (txErr) {
-      await session.abortTransaction();
-      throw txErr;
-    } finally {
-      session.endSession();
-    }
+      await ledgerService.creditMarketplaceSale(
+        item.sellerId,
+        sellerReceives,
+        commission,
+        {
+          itemId: item._id,
+          buyerId: req.user._id,
+        },
+        session
+      );
+    });
 
     // Update item stock
     const newStock = item.stock - 1;

@@ -20,6 +20,9 @@ const DAILY_WITHDRAWAL_LIMIT = parseFloat(process.env.DAILY_WITHDRAWAL_LIMIT || 
 router.get('/', protect, async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
     const recentTransactions = await Transaction.find({ userId: req.user._id })
       .sort({ createdAt: -1 })
       .limit(10);
@@ -275,11 +278,18 @@ router.post(
       const netAmount = parseFloat((withdrawAmount - fee).toFixed(2));
 
       // Hold funds: debit available balance, add to frozen (via ledger)
-      await ledgerService.hold(req.user._id, withdrawAmount, 'WITHDRAWAL', {
-        method,
-        accountNumber,
-        accountName: accountName || '',
-      });
+      try {
+        await ledgerService.hold(req.user._id, withdrawAmount, 'WITHDRAWAL', {
+          method,
+          accountNumber,
+          accountName: accountName || '',
+        });
+      } catch (holdErr) {
+        return res.status(400).json({
+          success: false,
+          message: holdErr.message || 'Insufficient balance',
+        });
+      }
 
       const transaction = await Transaction.create({
         userId: req.user._id,

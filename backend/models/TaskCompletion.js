@@ -25,11 +25,24 @@ const TaskCompletionSchema = new mongoose.Schema(
       enum: ['pending', 'approved', 'rejected'],
       default: 'approved',
     },
+    idempotencyKey: {
+      type: String,
+      sparse: true,
+      index: true,
+    },
   },
   { timestamps: true }
 );
 
 TaskCompletionSchema.index({ userId: 1, taskId: 1 });
 TaskCompletionSchema.index({ userId: 1, taskId: 1, completedAt: -1 });
+TaskCompletionSchema.index(
+  { idempotencyKey: 1 },
+  {
+    unique: true,
+    sparse: true,
+    partialFilterExpression: { idempotencyKey: { $exists: true, $ne: null } },
+  }
+);
 
 module.exports = mongoose.model('TaskCompletion', TaskCompletionSchema);

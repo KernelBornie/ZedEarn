@@ -2,7 +2,7 @@ import axios from 'axios';
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5001',
-  headers: { 'Content-Type': 'application/json' },
+  headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
 });
 
 api.interceptors.request.use((config) => {
@@ -17,7 +17,12 @@ api.interceptors.response.use(
     if (err.response?.status === 401) {
       localStorage.removeItem('ze_token');
       localStorage.removeItem('ze_user');
-      window.location.href = '/login';
+      window.dispatchEvent(new Event('auth:logout'));
+      const path = window.location.pathname;
+      const authRoutes = ['/login', '/register'];
+      if (!authRoutes.includes(path)) {
+        window.location.href = '/login';
+      }
     }
     return Promise.reject(err);
   }
