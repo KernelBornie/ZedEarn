@@ -9,6 +9,7 @@ const User = require('../models/User');
 const { protect, authorize } = require('../middleware/auth');
 const ledgerService = require('../services/ledgerService');
 const { safeTransaction } = require('../utils/dbTransaction');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -308,6 +309,20 @@ const completeTaskHandler = async (req, res, taskId) => {
         }
       }
 
+      if (maxCompletions <= 0) {
+        const spamWindowStart = new Date(now.getTime() - SPAM_WINDOW_MS);
+        const spamQuery = TaskCompletion.findOne({
+          userId: req.user._id,
+          taskId: task._id,
+          completedAt: { $gte: spamWindowStart },
+        }).sort({ completedAt: -1 });
+        if (session) spamQuery.session(session);
+        const spamCompletion = await spamQuery;
+        if (spamCompletion) {
+          throw createError(409, 'Task already completed');
+        }
+      }
+
       const rewardAmount = Number(task.reward || 0);
       if (!Number.isFinite(rewardAmount) || rewardAmount <= 0) {
         throw createError(400, 'Invalid task reward');
@@ -450,7 +465,7 @@ const completeTaskHandler = async (req, res, taskId) => {
           sessionOpts
         );
       } catch (err) {
-        console.error('Task completion notification failed', err.message);
+        logger.error('Task completion notification failed', { error: err.message });
       }
 
       return { task, transaction, completion, wallet, rewardAmount };

@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import api from '../api/axios';
 
 const AuthContext = createContext(null);
@@ -10,21 +10,21 @@ export function AuthProvider({ children }) {
     return stored ? JSON.parse(stored) : undefined;
   }); // undefined = loading
 
-  const persistUser = (data) => {
+  const persistUser = useCallback((data) => {
     setUser(data);
     if (data) {
       localStorage.setItem('ze_user', JSON.stringify(data));
     } else {
       localStorage.removeItem('ze_user');
     }
-  };
+  }, []);
 
-  const clearAuth = () => {
+  const clearAuth = useCallback(() => {
     localStorage.removeItem('ze_token');
     localStorage.removeItem('ze_user');
     setToken(null);
     setUser(null);
-  };
+  }, []);
 
   const isTokenExpired = (jwtToken) => {
     try {
@@ -41,7 +41,13 @@ export function AuthProvider({ children }) {
     };
     window.addEventListener('auth:logout', handleLogoutEvent);
     return () => window.removeEventListener('auth:logout', handleLogoutEvent);
-  }, []);
+  }, [clearAuth]);
+
+  const refreshUser = useCallback(async () => {
+    const res = await api.get('/api/auth/me');
+    persistUser(res.data.user);
+    return res.data.user;
+  }, [persistUser]);
 
   useEffect(() => {
     const handleWalletRefresh = () => {
@@ -51,7 +57,7 @@ export function AuthProvider({ children }) {
     };
     window.addEventListener('wallet:refresh', handleWalletRefresh);
     return () => window.removeEventListener('wallet:refresh', handleWalletRefresh);
-  }, [token]);
+  }, [token, refreshUser]);
 
   useEffect(() => {
     if (!token) {
@@ -69,7 +75,7 @@ export function AuthProvider({ children }) {
       .catch(() => {
         clearAuth();
       });
-  }, [token]);
+  }, [token, clearAuth, persistUser]);
 
   const login = async (credentials) => {
     const res = await api.post('/api/auth/login', credentials);
@@ -97,12 +103,6 @@ export function AuthProvider({ children }) {
     } finally {
       clearAuth();
     }
-  };
-
-  const refreshUser = async () => {
-    const res = await api.get('/api/auth/me');
-    persistUser(res.data.user);
-    return res.data.user;
   };
 
   return (
